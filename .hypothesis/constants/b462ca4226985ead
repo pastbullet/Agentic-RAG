@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/agent/llm_adapter.py
+# hypothesis_version: 6.151.9
+
+[4096, '120', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'anthropic', 'arguments', 'assistant', 'content', 'function', 'id', 'input', 'max_tokens', 'messages', 'model', 'name', 'openai', 'role', 'system', 'text', 'tool', 'tool_call_id', 'tool_calls', 'tool_result', 'tool_use', 'tool_use_id', 'tools', 'type', 'user']

@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/agent/loop.py
+# hypothesis_version: 6.151.9
+
+[200, '...', 'ANTHROPIC_MODEL_NAME', 'OPENAI_MODEL_NAME', '[达到最大轮次限制]', 'anthropic', 'claude', 'content', 'error', 'get_page_content', 'gpt-4o', 'openai', 'page', 'prompts', 'qa_system.txt', 'role', 'system', 'user', 'utf-8']

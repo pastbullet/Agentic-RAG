@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/tools/document_structure.py
+# hypothesis_version: 6.151.9
+
+['chunks_dir', 'current_part', 'doc_info', 'error', 'manifest.json', 'next_steps', 'pagination', 'r', 'structure', 'total_pages', 'total_parts', 'utf-8', 'valid_range']
