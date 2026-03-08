@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/main.py
+# hypothesis_version: 6.151.9
+
+['--doc', '--force', '--model', '--pdf', '--process', '--query', '--verbose', '=', 'LLM 模型名称（可选）', 'Tool Call Trace', '__main__', 'store_true', '仅处理文档：传入 PDF 路径', '强制重建文档处理产物', '用户问题（问答模式必填）', '问答模式必须提供 --query']

@@ -172,7 +172,13 @@ async def agentic_rag(
     # 组装初始消息列表 (Req 6.1)
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": query},
+        {
+            "role": "user",
+            "content": (
+                f"Target document: {doc_name}\n"
+                f"User question: {query}"
+            ),
+        },
     ]
 
     trace: list[ToolCallRecord] = []
