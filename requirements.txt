@@ -13,3 +13,6 @@ pydantic>=2.0
 hypothesis
 pytest
 pytest-asyncio
+fastapi
+uvicorn
+python-multipart

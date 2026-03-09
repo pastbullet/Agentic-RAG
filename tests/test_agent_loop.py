@@ -6,7 +6,11 @@
 - 未知工具名返回错误字典不抛异常 (Req 6.7)
 """
 
+import asyncio
+
+from src.agent import loop
 from src.agent.loop import TOOL_REGISTRY, execute_tool, load_system_prompt
+from src.models import LLMResponse, ToolCall, TokenUsage
 
 
 class TestToolRegistryExtensibility:
@@ -88,3 +92,82 @@ class TestPromptFileSwitching:
         qa_prompt = load_system_prompt("qa_system.txt")
         extraction_prompt = load_system_prompt("extraction_system.txt")
         assert qa_prompt != extraction_prompt
+
+
+def test_agentic_rag_emits_progress_events(monkeypatch):
+    events: list[dict] = []
+
+    class FakeAdapter:
+        def __init__(self, provider: str, model: str):
+            self.calls = 0
+
+        async def chat_with_tools(self, messages, tools):
+            self.calls += 1
+            if self.calls == 1:
+                return LLMResponse(
+                    has_tool_calls=True,
+                    tool_calls=[
+                        ToolCall(
+                            name="get_page_content",
+                            arguments={"doc_name": "doc.pdf", "pages": "3"},
+                            id="tc1",
+                        )
+                    ],
+                    usage=TokenUsage(prompt_tokens=1, completion_tokens=1),
+                    raw_message={
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "tc1",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_page_content",
+                                    "arguments": "{\"doc_name\": \"doc.pdf\", \"pages\": \"3\"}",
+                                },
+                            }
+                        ],
+                    },
+                )
+            return LLMResponse(
+                has_tool_calls=False,
+                tool_calls=[],
+                text="final",
+                usage=TokenUsage(prompt_tokens=1, completion_tokens=1),
+                raw_message={"role": "assistant", "content": "final"},
+            )
+
+        def make_tool_result_message(self, tool_call_id: str, result: dict) -> dict:
+            return {"role": "tool", "tool_call_id": tool_call_id, "content": "{}"}
+
+    monkeypatch.setattr(loop, "LLMAdapter", FakeAdapter)
+    monkeypatch.setattr(loop, "load_system_prompt", lambda *_: "system")
+    monkeypatch.setattr(loop, "get_tool_schemas", lambda: [])
+    monkeypatch.setattr(
+        loop,
+        "execute_tool",
+        lambda name, arguments: {
+            "content": [{"page": 3, "text": "ok", "tables": [], "images": []}]
+        },
+    )
+    monkeypatch.setattr(loop, "_save_session", lambda *args, **kwargs: None)
+
+    test_loop = asyncio.new_event_loop()
+    try:
+        response = test_loop.run_until_complete(
+            loop.agentic_rag(
+                query="q",
+                doc_name="doc.pdf",
+                max_turns=5,
+                progress_callback=events.append,
+            )
+        )
+    finally:
+        test_loop.close()
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+    assert response.answer == "final"
+    types = [e.get("type") for e in events]
+    assert "turn_start" in types
+    assert "tool_call" in types
+    assert "final_answer" in types

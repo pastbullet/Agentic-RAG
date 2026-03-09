@@ -235,3 +235,46 @@ def test_resolve_pdf_for_doc_ambiguous_match_raises(tmp_path: Path, monkeypatch)
 
     with pytest.raises(ValueError, match="Multiple PDF matches"):
         pipeline.resolve_pdf_for_doc("dup.pdf")
+
+
+def test_process_document_emits_progress_events(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _install_fake_builders(monkeypatch, total_pages=2)
+
+    pdf = tmp_path / "incoming" / "event_doc.pdf"
+    _write_dummy_pdf(pdf)
+
+    events: list[dict] = []
+    result = pipeline.process_document(str(pdf), progress_callback=events.append)
+
+    assert result.doc_name == "event_doc.pdf"
+    stages = [(e.get("type"), e.get("stage")) for e in events]
+    assert ("stage_start", "index") in stages
+    assert ("stage_done", "index") in stages
+    assert ("stage_start", "chunk") in stages
+    assert ("stage_done", "chunk") in stages
+    assert ("stage_start", "content") in stages
+    assert ("stage_done", "content") in stages
+    assert ("stage_start", "register") in stages
+    assert ("stage_done", "register") in stages
+    assert ("stage_done", "ingest") in stages
+
+
+def test_ensure_document_ready_skip_emits_event(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _install_fake_builders(monkeypatch, total_pages=2)
+
+    pdf = tmp_path / "incoming" / "ready_doc.pdf"
+    _write_dummy_pdf(pdf)
+    pipeline.process_document(str(pdf))
+
+    events: list[dict] = []
+    result = pipeline.ensure_document_ready(doc="ready_doc.pdf", progress_callback=events.append)
+
+    assert result.doc_name == "ready_doc.pdf"
+    assert any(
+        e.get("type") == "stage_done"
+        and e.get("stage") == "ensure_document_ready"
+        and e.get("skipped") is True
+        for e in events
+    )

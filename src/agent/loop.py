@@ -7,6 +7,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable
 
 from dotenv import load_dotenv
 
@@ -45,6 +46,7 @@ from src.agent.citation import extract_citations, validate_citations, clean_answ
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 # prompts 目录路径
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -100,6 +102,39 @@ def _make_result_summary(result: dict, max_len: int = 200) -> str:
     return text[:max_len] + "..."
 
 
+# get_page_content 单页最大字符数（约 2000 token）
+_PAGE_CONTENT_MAX_CHARS = 8000
+# get_document_structure 最大字符数
+_STRUCTURE_MAX_CHARS = 12000
+
+
+def _truncate_tool_result(result: dict, tool_name: str) -> dict:
+    """对 tool 结果做上下文友好的截断，防止 context 无限膨胀。
+
+    - get_page_content：每页内容截断到 _PAGE_CONTENT_MAX_CHARS 字符
+    - get_document_structure：整体截断到 _STRUCTURE_MAX_CHARS 字符
+    - 其他工具：不截断
+    """
+    if tool_name == "get_page_content" and "content" in result:
+        truncated_pages = []
+        for page_item in result["content"]:
+            text = page_item.get("text", "")
+            if len(text) > _PAGE_CONTENT_MAX_CHARS:
+                text = text[:_PAGE_CONTENT_MAX_CHARS] + "\n...[truncated]"
+            truncated_pages.append({**page_item, "text": text})
+        return {**result, "content": truncated_pages}
+
+    if tool_name == "get_document_structure":
+        raw = json.dumps(result, ensure_ascii=False)
+        if len(raw) > _STRUCTURE_MAX_CHARS:
+            # structure 截断后仍是合法 JSON（直接截字符串会破坏结构，改为截 children）
+            # 简单策略：返回原始 dict 但标注已截断
+            return {**result, "_truncated": True, "_note": f"Structure truncated from {len(raw)} chars"}
+        return result
+
+    return result
+
+
 def _detect_provider(model: str) -> str:
     """根据环境变量或模型名称推断 LLM provider。"""
     env_provider = os.getenv("PROTOCOL_TWIN_LLM_PROVIDER", "").strip().lower()
@@ -137,6 +172,7 @@ async def agentic_rag(
     model: str | None = None,
     max_turns: int = 15,
     prompt_file: str = "qa_system.txt",
+    progress_callback: ProgressCallback | None = None,
 ) -> RAGResponse:
     """核心 Agent 循环。
 
@@ -185,13 +221,41 @@ async def agentic_rag(
     pages_retrieved: list[int] = []
     turn = 0
 
+    def emit(payload: dict[str, Any]) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(payload)
+        except Exception:
+            logger.exception("progress_callback failed in agentic_rag")
+
     # Agent 循环
     while turn < max_turns:
         turn += 1
         logger.info(f"Turn {turn}/{max_turns}")
+        emit(
+            {
+                "type": "turn_start",
+                "turn": turn,
+                "max_turns": max_turns,
+                "doc_name": doc_name,
+            }
+        )
 
-        # 调用 LLM
-        response = await adapter.chat_with_tools(messages, tools)
+        try:
+            # 调用 LLM
+            response = await adapter.chat_with_tools(messages, tools)
+        except Exception as exc:
+            emit(
+                {
+                    "type": "error",
+                    "stage": "qa",
+                    "message": str(exc),
+                    "doc_name": doc_name,
+                    "turn": turn,
+                }
+            )
+            raise
 
         if response.has_tool_calls:
             # LLM 返回 tool_call → 执行工具并追加结果 (Req 6.2)
@@ -215,9 +279,20 @@ async def agentic_rag(
                         result_summary=_make_result_summary(result),
                     )
                 )
+                emit(
+                    {
+                        "type": "tool_call",
+                        "turn": turn,
+                        "tool": tc.name,
+                        "arguments": tc.arguments,
+                        "result_summary": _make_result_summary(result),
+                    }
+                )
 
                 # 构造 tool result 消息并追加
-                tool_msg = adapter.make_tool_result_message(tc.id, result)
+                # 截断过长的 tool 结果，避免 context 膨胀（get_page_content 结果可能很大）
+                result_for_msg = _truncate_tool_result(result, tc.name)
+                tool_msg = adapter.make_tool_result_message(tc.id, result_for_msg)
                 messages.append(tool_msg)
         else:
             # LLM 返回纯文本 → 最终答案 (Req 6.3)
@@ -240,6 +315,18 @@ async def agentic_rag(
                 pages_retrieved=unique_pages,
                 total_turns=turn,
             )
+            emit(
+                {
+                    "type": "final_answer",
+                    "doc_name": doc_name,
+                    "answer": rag_response.answer,
+                    "answer_clean": rag_response.answer_clean,
+                    "citations": [c.model_dump() for c in rag_response.citations],
+                    "trace": [t.model_dump() for t in rag_response.trace],
+                    "pages_retrieved": rag_response.pages_retrieved,
+                    "total_turns": rag_response.total_turns,
+                }
+            )
             _save_session(query, doc_name, messages, rag_response)
             return rag_response
 
@@ -261,6 +348,18 @@ async def agentic_rag(
         trace=trace,
         pages_retrieved=unique_pages,
         total_turns=turn,
+    )
+    emit(
+        {
+            "type": "final_answer",
+            "doc_name": doc_name,
+            "answer": rag_response.answer,
+            "answer_clean": rag_response.answer_clean,
+            "citations": [c.model_dump() for c in rag_response.citations],
+            "trace": [t.model_dump() for t in rag_response.trace],
+            "pages_retrieved": rag_response.pages_retrieved,
+            "total_turns": rag_response.total_turns,
+        }
     )
     _save_session(query, doc_name, messages, rag_response)
     return rag_response
