@@ -41,6 +41,7 @@ class QARequest(BaseModel):
     query: str = Field(min_length=1)
     doc_name: str | None = None
     pdf_path: str | None = None
+    history: list[dict[str, str]] | None = None
     force: bool = False
     model: str | None = None
     max_turns: int = 15
@@ -280,6 +281,7 @@ def create_app() -> FastAPI:
             doc_name=ready.doc_name,
             model=req.model,
             max_turns=req.max_turns,
+            history_messages=req.history,
         )
         logger.info("[web] qa done: doc=%s turns=%s", ready.doc_name, response.total_turns)
         return {
@@ -352,6 +354,7 @@ def create_app() -> FastAPI:
                 model=req.model,
                 max_turns=req.max_turns,
                 progress_callback=emit,
+                history_messages=req.history,
             )
             logger.info("[web] qa/stream done: doc=%s turns=%s", ready.doc_name, response.total_turns)
             return {

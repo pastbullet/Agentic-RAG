@@ -162,6 +162,7 @@ def test_qa_stream_emits_turn_and_final(client: TestClient, monkeypatch):
         model: str | None = None,
         max_turns: int = 15,
         progress_callback=None,
+        history_messages=None,
     ):
         if progress_callback:
             progress_callback({"type": "turn_start", "turn": 1, "max_turns": max_turns, "doc_name": doc_name})

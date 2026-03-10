@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -15,7 +16,7 @@ from dotenv import load_dotenv
 SESSION_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs" / "sessions"
 
 
-def _save_session(query: str, doc_name: str, messages: list[dict], response: "RAGResponse") -> Path:
+def _save_session(query: str, doc_name: str, messages: list[dict], response: "RAGResponse", context_session_id: str | None = None) -> Path:
     """将完整的 messages 历史和最终答案保存到 logs/sessions/<timestamp>.json。"""
     SESSION_LOG_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -32,6 +33,8 @@ def _save_session(query: str, doc_name: str, messages: list[dict], response: "RA
         "trace": [t.model_dump() for t in response.trace],
         "messages": messages,
     }
+    if context_session_id is not None:
+        payload["context_session_id"] = context_session_id
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info(f"Session saved → {path}")
     return path
@@ -42,6 +45,7 @@ from src.tools.page_content import get_page_content
 from src.tools.schemas import get_tool_schemas
 from src.agent.llm_adapter import LLMAdapter
 from src.agent.citation import extract_citations, validate_citations, clean_answer
+from src.context import ContextManager
 
 load_dotenv()
 
@@ -106,6 +110,11 @@ def _make_result_summary(result: dict, max_len: int = 200) -> str:
 _PAGE_CONTENT_MAX_CHARS = 8000
 # get_document_structure 最大字符数
 _STRUCTURE_MAX_CHARS = 12000
+_MAX_HISTORY_MESSAGES = 8
+_MAX_HISTORY_CHARS = 4000
+
+_TABLE_REF_PATTERN = re.compile(r"(?:\btable|表)\s*#?\s*(\d{1,4})", re.IGNORECASE)
+_EXPLICIT_PAGE_PATTERN = re.compile(r"(?:第\s*\d+\s*页|\bpage\s*\d+\b)", re.IGNORECASE)
 
 
 def _truncate_tool_result(result: dict, tool_name: str) -> dict:
@@ -133,6 +142,46 @@ def _truncate_tool_result(result: dict, tool_name: str) -> dict:
         return result
 
     return result
+
+
+def _normalize_history_messages(
+    history_messages: list[dict[str, str]] | None,
+) -> list[dict[str, str]]:
+    """Normalize and clamp history messages for LLM input."""
+    if not history_messages:
+        return []
+
+    normalized: list[dict[str, str]] = []
+    for item in history_messages[-_MAX_HISTORY_MESSAGES:]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"}:
+            continue
+        if not isinstance(content, str):
+            continue
+        text = content.strip()
+        if not text:
+            continue
+        if len(text) > _MAX_HISTORY_CHARS:
+            text = text[:_MAX_HISTORY_CHARS] + "\n...[history truncated]"
+        normalized.append({"role": role, "content": text})
+    return normalized
+
+
+def _augment_query_with_disambiguation(query: str) -> str:
+    """Add a lightweight hint when query mentions table IDs without explicit page intent."""
+    if not _TABLE_REF_PATTERN.search(query):
+        return query
+    if _EXPLICIT_PAGE_PATTERN.search(query):
+        return query
+    return (
+        f"{query}\n\n"
+        "[Disambiguation: references like '表149' / 'Table 149' are table IDs, "
+        "not page numbers, unless the user explicitly says '第149页' or 'page 149'. "
+        "Locate the table first, then use its actual source page(s).]"
+    )
 
 
 def _detect_provider(model: str) -> str:
@@ -173,6 +222,7 @@ async def agentic_rag(
     max_turns: int = 15,
     prompt_file: str = "qa_system.txt",
     progress_callback: ProgressCallback | None = None,
+    history_messages: list[dict[str, str]] | None = None,
 ) -> RAGResponse:
     """核心 Agent 循环。
 
@@ -204,18 +254,21 @@ async def agentic_rag(
     # 加载 system prompt 和 tool schemas
     system_prompt = load_system_prompt(prompt_file)
     tools = get_tool_schemas()
+    normalized_history = _normalize_history_messages(history_messages)
+    query_for_llm = _augment_query_with_disambiguation(query)
 
     # 组装初始消息列表 (Req 6.1)
-    messages: list[dict] = [
-        {"role": "system", "content": system_prompt},
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    messages.extend(normalized_history)
+    messages.append(
         {
             "role": "user",
             "content": (
                 f"Target document: {doc_name}\n"
-                f"User question: {query}"
+                f"User question: {query_for_llm}"
             ),
-        },
-    ]
+        }
+    )
 
     trace: list[ToolCallRecord] = []
     pages_retrieved: list[int] = []
@@ -228,6 +281,18 @@ async def agentic_rag(
             progress_callback(payload)
         except Exception:
             logger.exception("progress_callback failed in agentic_rag")
+
+    # ── Context Management Sidecar ──
+    ctx: ContextManager | None = None
+    ctx_session_id: str | None = None
+    ctx_turn_id: str | None = None
+    try:
+        ctx = ContextManager()
+        ctx_session_id = ctx.create_session(doc_name)
+        ctx_turn_id = ctx.create_turn(query, doc_name)
+    except Exception:
+        logger.exception("Context manager initialization failed")
+        ctx = None
 
     # Agent 循环
     while turn < max_turns:
@@ -289,6 +354,13 @@ async def agentic_rag(
                     }
                 )
 
+                # Context sidecar: record tool call
+                if ctx is not None:
+                    try:
+                        ctx.record_tool_call(ctx_turn_id, tc.name, tc.arguments, result, doc_id=doc_name)
+                    except Exception:
+                        logger.exception("Context manager record_tool_call failed")
+
                 # 构造 tool result 消息并追加
                 # 截断过长的 tool 结果，避免 context 膨胀（get_page_content 结果可能很大）
                 result_for_msg = _truncate_tool_result(result, tc.name)
@@ -327,7 +399,15 @@ async def agentic_rag(
                     "total_turns": rag_response.total_turns,
                 }
             )
-            _save_session(query, doc_name, messages, rag_response)
+            # Context sidecar: finalize
+            if ctx is not None:
+                try:
+                    answer_payload = {"answer": rag_response.answer, "citations": [c.model_dump() for c in rag_response.citations]}
+                    ctx.finalize_turn(ctx_turn_id, answer_payload)
+                    ctx.finalize_session()
+                except Exception:
+                    logger.exception("Context manager finalize failed")
+            _save_session(query, doc_name, messages, rag_response, context_session_id=ctx_session_id)
             return rag_response
 
     # 达到 max_turns 限制 (Req 6.5)
@@ -361,5 +441,13 @@ async def agentic_rag(
             "total_turns": rag_response.total_turns,
         }
     )
-    _save_session(query, doc_name, messages, rag_response)
+    # Context sidecar: finalize
+    if ctx is not None:
+        try:
+            answer_payload = {"answer": rag_response.answer, "citations": [c.model_dump() for c in rag_response.citations]}
+            ctx.finalize_turn(ctx_turn_id, answer_payload)
+            ctx.finalize_session()
+        except Exception:
+            logger.exception("Context manager finalize failed")
+    _save_session(query, doc_name, messages, rag_response, context_session_id=ctx_session_id)
     return rag_response

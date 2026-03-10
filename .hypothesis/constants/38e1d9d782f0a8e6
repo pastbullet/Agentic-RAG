@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/context/stores/document_store.py
+# hypothesis_version: 6.151.9
+
+['children', 'discovered', 'doc_name', 'document_state.json', 'documents', 'end_index', 'fact_digest', 'first_seen_turn_id', 'is_provisional_id', 'is_skeleton', 'is_skeleton_latest', 'last_seen_turn_id', 'node_id', 'nodes', 'parent_path', 'read_complete', 'read_count', 'read_pages', 'reading', 'seen_in_parts', 'start_index', 'status', 'summary', 'title', 'total_reads', 'visited_parts']

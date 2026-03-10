@@ -16,6 +16,13 @@ Follow this workflow to answer questions:
 
 5. **Generate answer**: Once you have sufficient information, compose a clear and accurate answer based on the retrieved content.
 
+## Disambiguation Rules
+
+- Do not confuse object IDs with page numbers.
+- Mentions like `Table 149`, `表149`, `Figure 12`, `图12`, section IDs, or clause IDs are identifiers, not page numbers.
+- Only treat a number as a page number when the user explicitly says `第N页` or `page N`.
+- If the user refers to a table/figure ID, first locate that object in retrieved content, then cite its actual source page(s).
+
 ## Factual Constraint
 
 - Only answer based on content you have actually retrieved through `get_page_content`. Do not fabricate or assume information that is not present in the retrieved pages.

@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/context/stores/turn_store.py
+# hypothesis_version: 6.151.9
+
+['active', 'answer_payload', 'arguments', 'completed', 'doc_name', 'finished_at', 'pages_read', 'result_summary', 'retrieval_trace', 'started_at', 'status', 'structure_parts_seen', 'timestamp', 'tool_calls', 'tool_name', 'turn_id', 'user_query']

@@ -171,3 +171,80 @@ def test_agentic_rag_emits_progress_events(monkeypatch):
     assert "turn_start" in types
     assert "tool_call" in types
     assert "final_answer" in types
+
+
+def test_table_reference_query_is_augmented():
+    text = loop._augment_query_with_disambiguation("请基于表149整理成结构图")
+    assert "table IDs" in text
+    assert "第149页" in text
+
+    unchanged = loop._augment_query_with_disambiguation("请看第149页内容")
+    assert unchanged == "请看第149页内容"
+
+
+def test_agentic_rag_includes_history_messages(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeContextManager:
+        def create_session(self, doc_name: str) -> str:
+            return "sess_test"
+
+        def create_turn(self, user_query: str, doc_name: str) -> str:
+            return "turn_0001"
+
+        def record_tool_call(self, *args, **kwargs) -> None:
+            return None
+
+        def finalize_turn(self, *args, **kwargs) -> None:
+            return None
+
+        def finalize_session(self) -> None:
+            return None
+
+    class FakeAdapter:
+        def __init__(self, provider: str, model: str):
+            pass
+
+        async def chat_with_tools(self, messages, tools):
+            captured["messages"] = messages
+            return LLMResponse(
+                has_tool_calls=False,
+                tool_calls=[],
+                text="ok",
+                usage=TokenUsage(prompt_tokens=1, completion_tokens=1),
+                raw_message={"role": "assistant", "content": "ok"},
+            )
+
+        def make_tool_result_message(self, tool_call_id: str, result: dict) -> dict:
+            return {"role": "tool", "tool_call_id": tool_call_id, "content": "{}"}
+
+    monkeypatch.setattr(loop, "ContextManager", FakeContextManager)
+    monkeypatch.setattr(loop, "LLMAdapter", FakeAdapter)
+    monkeypatch.setattr(loop, "load_system_prompt", lambda *_: "system")
+    monkeypatch.setattr(loop, "get_tool_schemas", lambda: [])
+    monkeypatch.setattr(loop, "_save_session", lambda *args, **kwargs: None)
+
+    test_loop = asyncio.new_event_loop()
+    try:
+        response = test_loop.run_until_complete(
+            loop.agentic_rag(
+                query="基于表149继续",
+                doc_name="doc.pdf",
+                history_messages=[
+                    {"role": "user", "content": "请解释 Table 149"},
+                    {"role": "assistant", "content": "Table 149 是 FLOGI Payload 字段布局"},
+                ],
+            )
+        )
+    finally:
+        test_loop.close()
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+    assert response.answer == "ok"
+    msgs = captured["messages"]
+    assert isinstance(msgs, list)
+    assert len(msgs) >= 4
+    assert msgs[1]["role"] == "user"
+    assert "Table 149" in msgs[1]["content"]
+    assert msgs[2]["role"] == "assistant"
+    assert "table IDs" in msgs[3]["content"]

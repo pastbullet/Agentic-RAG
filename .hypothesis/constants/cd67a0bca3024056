@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/agent/loop.py
+# hypothesis_version: 6.151.9
+
+[200, 8000, 12000, '\n...[truncated]', '%Y%m%d_%H%M%S', '...', 'ANTHROPIC_MODEL_NAME', 'OPENAI_MODEL_NAME', 'RAGResponse', '[达到最大轮次限制]', '_note', '_truncated', 'answer', 'answer_clean', 'anthropic', 'arguments', 'citations', 'claude', 'content', 'doc_name', 'error', 'final_answer', 'get_page_content', 'gpt-4o', 'logs', 'max_turns', 'message', 'messages', 'openai', 'page', 'pages_retrieved', 'prompts', 'qa', 'qa_system.txt', 'query', 'result_summary', 'role', 'sessions', 'stage', 'system', 'text', 'timestamp', 'tool', 'tool_call', 'total_turns', 'trace', 'turn', 'turn_start', 'type', 'user', 'utf-8']
