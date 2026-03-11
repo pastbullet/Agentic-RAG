@@ -25,6 +25,11 @@
 
 ```text
 .
+├── page_index.py                # 旧索引主脚本（ingest 会调用）
+├── structure_chunker.py         # 结构分块脚本（ingest 会调用）
+├── build_content_db.py          # 内容库构建脚本（ingest 会调用）
+├── run_pageindex.py             # 旧版运行入口（兼容保留）
+├── utils.py                     # 旧脚本公共工具函数
 ├── src/
 │   ├── main.py                  # CLI 统一入口（处理/问答）
 │   ├── evaluate.py              # 评测入口
@@ -52,6 +57,8 @@
 ├── logs/sessions/               # QA 会话日志（消息/trace/答案）
 └── tests/                       # 单元 + 集成测试
 ```
+
+说明：上面几份根目录脚本属于“历史核心脚本”，当前 `src/ingest/pipeline.py` 通过最小侵入方式复用它们，而不是重写一套新实现。
 
 ---
 
@@ -216,4 +223,3 @@ python -m src.evaluate --test-set data/eval/goldset_pr9.json --model gpt-4o
 
 - 本仓库目标是“**在现有 pageIndex 体系上做最小侵入工程化整合**”，而不是重做检索体系。
 - 当前架构已经具备后续扩展空间（新工具、新 prompt 模式、结构化提取）。
-
