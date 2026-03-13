@@ -35,6 +35,20 @@ class ProcessPathRequest(BaseModel):
     pdf_path: str = Field(min_length=1)
     force: bool = False
     model: str | None = None
+    toc_check_pages: int | None = None
+    max_pages_per_node: int | None = None
+    max_tokens_per_node: int | None = None
+    if_add_node_id: str | None = None
+    if_add_node_summary: str | None = None
+    if_add_node_text: str | None = None
+    if_add_doc_description: str | None = None
+    structure_max_limit: int | None = None
+    structure_chunk_max_limit: int | None = None
+    content_chunk_size: int | None = None
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
 
 
 class QARequest(BaseModel):
@@ -44,7 +58,18 @@ class QARequest(BaseModel):
     history: list[dict[str, str]] | None = None
     force: bool = False
     model: str | None = None
-    max_turns: int = 15
+    prompt_file: str | None = None
+    max_turns: int = 20
+    toc_check_pages: int | None = None
+    max_pages_per_node: int | None = None
+    max_tokens_per_node: int | None = None
+    if_add_node_id: str | None = None
+    if_add_node_summary: str | None = None
+    if_add_node_text: str | None = None
+    if_add_doc_description: str | None = None
+    structure_max_limit: int | None = None
+    structure_chunk_max_limit: int | None = None
+    content_chunk_size: int | None = None
 
 
 def _normalize_doc_name(doc_name: str) -> str:
@@ -116,6 +141,48 @@ def _sse_pack(payload: dict[str, Any]) -> str:
     return f"event: message\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _extract_process_options(payload: Any) -> dict[str, Any]:
+    if payload is None:
+        return {}
+
+    keys = (
+        "toc_check_pages",
+        "max_pages_per_node",
+        "max_tokens_per_node",
+        "if_add_node_id",
+        "if_add_node_summary",
+        "if_add_node_text",
+        "if_add_doc_description",
+        "structure_max_limit",
+        "structure_chunk_max_limit",
+        "content_chunk_size",
+    )
+    options: dict[str, Any] = {}
+    for key in keys:
+        if isinstance(payload, dict):
+            value = payload.get(key)
+        else:
+            value = getattr(payload, key, None)
+        if value is None:
+            continue
+        options[key] = value
+    if "structure_chunk_max_limit" in options:
+        options["structure_max_limit"] = options.pop("structure_chunk_max_limit")
+    return options
+
+
+def _parse_process_options_json(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid process_options_json") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="process_options_json must be a JSON object")
+    return _extract_process_options(payload)
+
+
 async def _stream_events(work: StreamWork) -> Any:
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -178,6 +245,7 @@ def create_app() -> FastAPI:
                     "timestamp": payload.get("timestamp", fp.stem),
                     "doc_name": payload.get("doc_name", ""),
                     "query": payload.get("query", ""),
+                    "title": payload.get("title", ""),
                     "total_turns": payload.get("total_turns", 0),
                     "pages_retrieved": payload.get("pages_retrieved", []),
                 }
@@ -190,6 +258,24 @@ def create_app() -> FastAPI:
         if not fp.exists():
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
         return _load_session(fp)
+
+    @app.patch("/api/sessions/{session_id}/rename")
+    async def rename_session(session_id: str, req: RenameRequest) -> dict[str, Any]:
+        fp = _session_path(session_id)
+        if not fp.exists():
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        payload = _load_session(fp)
+        payload["title"] = req.title.strip()
+        fp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "id": session_id, "title": payload["title"]}
+
+    @app.delete("/api/sessions/{session_id}")
+    async def delete_session(session_id: str) -> dict[str, Any]:
+        fp = _session_path(session_id)
+        if not fp.exists():
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        fp.unlink()
+        return {"ok": True, "id": session_id}
 
     @app.get("/api/docs")
     async def list_docs() -> dict[str, Any]:
@@ -222,11 +308,13 @@ def create_app() -> FastAPI:
     @app.post("/api/process/path")
     async def process_path(req: ProcessPathRequest) -> dict[str, Any]:
         logger.info("[web] process/path start: %s", req.pdf_path)
+        process_options = _extract_process_options(req)
         result = await asyncio.to_thread(
             process_document,
             pdf_path=req.pdf_path,
             force=req.force,
             model=req.model,
+            **process_options,
         )
         logger.info("[web] process/path done: %s", result.doc_name)
         return {"ok": True, "result": _process_result_to_dict(result)}
@@ -251,14 +339,17 @@ def create_app() -> FastAPI:
         file: UploadFile = File(...),
         force: bool = Form(False),
         model: str | None = Form(None),
+        process_options_json: str | None = Form(None),
     ) -> dict[str, Any]:
         saved_pdf = await _save_uploaded_pdf(file)
         logger.info("[web] process/upload start: %s", saved_pdf)
+        process_options = _parse_process_options_json(process_options_json)
         result = await asyncio.to_thread(
             process_document,
             pdf_path=str(saved_pdf),
             force=force,
             model=model,
+            **process_options,
         )
         logger.info("[web] process/upload done: %s", result.doc_name)
         return {"ok": True, "saved_pdf": str(saved_pdf), "result": _process_result_to_dict(result)}
@@ -269,17 +360,20 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Either doc_name or pdf_path must be provided")
 
         logger.info("[web] qa start: doc=%s pdf=%s", req.doc_name, req.pdf_path)
+        process_options = _extract_process_options(req)
         ready = await asyncio.to_thread(
             ensure_document_ready,
             doc=req.doc_name,
             pdf=req.pdf_path,
             force=req.force,
             model=req.model,
+            **process_options,
         )
         response = await agentic_rag(
             query=req.query,
             doc_name=ready.doc_name,
             model=req.model,
+            prompt_file=req.prompt_file or "qa_system.txt",
             max_turns=req.max_turns,
             history_messages=req.history,
         )
@@ -294,6 +388,7 @@ def create_app() -> FastAPI:
     @app.post("/api/process/path/stream")
     async def process_path_stream(req: ProcessPathRequest) -> StreamingResponse:
         logger.info("[web] process/path/stream start: %s", req.pdf_path)
+        process_options = _extract_process_options(req)
 
         async def work(emit: ProgressEmitter) -> dict[str, Any]:
             result = await asyncio.to_thread(
@@ -301,6 +396,7 @@ def create_app() -> FastAPI:
                 pdf_path=req.pdf_path,
                 force=req.force,
                 model=req.model,
+                **process_options,
                 progress_callback=emit,
             )
             return {"process": _process_result_to_dict(result)}
@@ -312,9 +408,11 @@ def create_app() -> FastAPI:
         file: UploadFile = File(...),
         force: bool = Form(False),
         model: str | None = Form(None),
+        process_options_json: str | None = Form(None),
     ) -> StreamingResponse:
         saved_pdf = await _save_uploaded_pdf(file)
         logger.info("[web] process/upload/stream start: %s", saved_pdf)
+        process_options = _parse_process_options_json(process_options_json)
 
         async def work(emit: ProgressEmitter) -> dict[str, Any]:
             emit({"type": "stage_start", "stage": "upload", "pdf_path": str(saved_pdf)})
@@ -324,6 +422,7 @@ def create_app() -> FastAPI:
                 pdf_path=str(saved_pdf),
                 force=force,
                 model=model,
+                **process_options,
                 progress_callback=emit,
             )
             return {"saved_pdf": str(saved_pdf), "process": _process_result_to_dict(result)}
@@ -336,6 +435,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Either doc_name or pdf_path must be provided")
 
         logger.info("[web] qa/stream start: doc=%s pdf=%s", req.doc_name, req.pdf_path)
+        process_options = _extract_process_options(req)
 
         async def work(emit: ProgressEmitter) -> dict[str, Any]:
             ready = await asyncio.to_thread(
@@ -344,6 +444,7 @@ def create_app() -> FastAPI:
                 pdf=req.pdf_path,
                 force=req.force,
                 model=req.model,
+                **process_options,
                 progress_callback=emit,
             )
             emit({"type": "stage_done", "stage": "ensure_document_ready", "doc_name": ready.doc_name})
@@ -352,6 +453,7 @@ def create_app() -> FastAPI:
                 query=req.query,
                 doc_name=ready.doc_name,
                 model=req.model,
+                prompt_file=req.prompt_file or "qa_system.txt",
                 max_turns=req.max_turns,
                 progress_callback=emit,
                 history_messages=req.history,

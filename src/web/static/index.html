@@ -44,6 +44,109 @@
             height: 56px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
         }
         .doc-title { font-weight:600; color:#1f2937; display:flex; align-items:center; gap:6px; }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            position: relative;
+        }
+        .upload-btn {
+            background:#f3f4f6;
+            border:none;
+            padding:8px 12px;
+            border-radius:6px;
+            cursor:pointer;
+            font-size:13px;
+            font-weight:500;
+            color:#374151;
+        }
+        .upload-btn:hover { background: #e5e7eb; }
+        .settings-dropdown {
+            position: relative;
+        }
+        .settings-trigger {
+            list-style: none;
+            background: #eef2ff;
+            border: 1px solid #c7d2fe;
+            color: #3730a3;
+            padding: 7px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .settings-trigger::-webkit-details-marker { display: none; }
+        .settings-panel {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 8px);
+            width: 360px;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            box-shadow: 0 10px 24px rgba(0,0,0,0.12);
+            padding: 12px;
+            z-index: 30;
+        }
+        .settings-group {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .settings-group summary {
+            background: #f8fafc;
+            padding: 8px 10px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #374151;
+            font-weight: 600;
+            user-select: none;
+        }
+        .settings-body {
+            padding: 8px 10px;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+        .settings-row {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #374151;
+        }
+        .settings-row input, .settings-row select {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 5px 7px;
+            font-size: 12px;
+            color: #111827;
+            background: #fff;
+        }
+        .settings-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 4px;
+            gap: 8px;
+        }
+        .settings-meta {
+            font-size: 11px;
+            color: #6b7280;
+        }
+        .settings-reset-btn {
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #374151;
+            padding: 5px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .settings-reset-btn:hover { background: #f3f4f6; }
         
         /* 消息区域 */
         .messages-area {
@@ -104,6 +207,70 @@
             transition: background 0.15s;
         }
         .cite-sup:hover { background: #dbeafe; }        /* 输入框 */
+        .ai-live-status {
+            font-size: 13px;
+            color: #6b7280;
+            margin-bottom: 10px;
+        }
+        .ai-answer {
+            margin-bottom: 10px;
+        }
+        .trace-panel {
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: #fafafa;
+            overflow: hidden;
+        }
+        .trace-panel summary {
+            cursor: pointer;
+            font-size: 13px;
+            color: #374151;
+            padding: 10px 12px;
+            user-select: none;
+            background: #f3f4f6;
+        }
+        .trace-list {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 360px;
+            overflow: auto;
+        }
+        .trace-item {
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            border-radius: 8px;
+            padding: 8px 10px;
+        }
+        .trace-item-title {
+            font-size: 12px;
+            color: #111827;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .trace-item pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 8px;
+            font-size: 12px;
+            line-height: 1.45;
+            color: #374151;
+        }
+        .trace-item.trace-thought {
+            border-color: #c7d2fe;
+            background: #eef2ff;
+        }
+        .trace-item.trace-error {
+            border-color: #fecaca;
+            background: #fef2f2;
+        }
+
+        /* 输入框 */
         .input-wrapper { padding: 24px; background: #fff; }
         .input-box {
             max-width: 800px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px;
@@ -172,6 +339,31 @@
         .sidebar-divider { height: 1px; background: #e5e7eb; margin: 8px 12px; }
         .session-item { padding: 8px 12px; font-size: 13px; color: #666; cursor: pointer; border-radius: 6px; margin: 0 10px 3px; }
         .session-item:hover { background: #f3f4f6; color: #000; }
+        .session-item-row { display: flex; align-items: center; gap: 4px; }
+        .session-item-text { flex: 1; min-width: 0; cursor: pointer; }
+        .session-title { font-weight: 500; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .session-doc { font-size: 12px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .session-rename-btn {
+            flex-shrink: 0; background: none; border: none; cursor: pointer;
+            font-size: 12px; padding: 2px 4px; border-radius: 4px; opacity: 0; transition: opacity 0.15s;
+        }
+        .session-item:hover .session-rename-btn { opacity: 1; }
+        .session-delete-btn {
+            flex-shrink: 0; background: none; border: none; cursor: pointer;
+            font-size: 12px; padding: 2px 4px; border-radius: 4px; opacity: 0; transition: opacity 0.15s;
+        }
+        .session-item:hover .session-delete-btn { opacity: 1; }
+        .session-delete-btn:hover { background: #fee2e2; }
+        .session-rename-input {
+            flex: 1; min-width: 0; border: 1px solid #a5b4fc; border-radius: 4px;
+            padding: 3px 6px; font-size: 13px; outline: none;
+        }
+        .session-rename-confirm, .session-rename-cancel {
+            flex-shrink: 0; background: none; border: none; cursor: pointer;
+            font-size: 13px; padding: 2px 4px; border-radius: 4px;
+        }
+        .session-rename-confirm:hover { background: #d1fae5; }
+        .session-rename-cancel:hover { background: #fee2e2; }
 
     </style>
 </head>
@@ -200,10 +392,103 @@
             <div class="doc-title" id="docTitle">
                 <span style="color:#9ca3af">No PDF</span>
             </div>
-            <div>
+            <div class="header-actions">
+                <details class="settings-dropdown" id="processSettingsDropdown">
+                    <summary class="settings-trigger">⚙️ 处理参数</summary>
+                    <div class="settings-panel">
+                        <details class="settings-group" open>
+                            <summary>基础参数</summary>
+                            <div class="settings-body">
+                                <label class="settings-row">
+                                    <span>模型 (model)</span>
+                                    <input id="setting-model" type="text" placeholder="留空使用默认">
+                                </label>
+                                <label class="settings-row">
+                                    <span>回答模式</span>
+                                    <select id="setting-answer-mode">
+                                        <option value="standard">标准模式</option>
+                                        <option value="pageindex">PageIndex 步骤式</option>
+                                    </select>
+                                </label>
+                                <label class="settings-row">
+                                    <span>强制重建 (force)</span>
+                                    <select id="setting-force">
+                                        <option value="false">false</option>
+                                        <option value="true">true</option>
+                                    </select>
+                                </label>
+                                <label class="settings-row">
+                                    <span>TOC 检查页数</span>
+                                    <input id="setting-toc-check-pages" type="number" min="1" step="1">
+                                </label>
+                                <label class="settings-row">
+                                    <span>内容块大小 (页)</span>
+                                    <input id="setting-content-chunk-size" type="number" min="1" step="1">
+                                </label>
+                                <label class="settings-row">
+                                    <span>最大推理轮次</span>
+                                    <input id="setting-max-turns" type="number" min="1" max="50" step="1">
+                                </label>
+                            </div>
+                        </details>
+                        <details class="settings-group">
+                            <summary>切分阈值</summary>
+                            <div class="settings-body">
+                                <label class="settings-row">
+                                    <span>每节点最大页数</span>
+                                    <input id="setting-max-pages-per-node" type="number" min="1" step="1">
+                                </label>
+                                <label class="settings-row">
+                                    <span>每节点最大 Token</span>
+                                    <input id="setting-max-tokens-per-node" type="number" min="1" step="1">
+                                </label>
+                                <label class="settings-row">
+                                    <span>StructureChunk max_limit</span>
+                                    <input id="setting-structure-chunk-max-limit" type="number" min="1000" step="1000">
+                                </label>
+                            </div>
+                        </details>
+                        <details class="settings-group">
+                            <summary>输出字段</summary>
+                            <div class="settings-body">
+                                <label class="settings-row">
+                                    <span>添加 node_id</span>
+                                    <select id="setting-if-add-node-id">
+                                        <option value="yes">yes</option>
+                                        <option value="no">no</option>
+                                    </select>
+                                </label>
+                                <label class="settings-row">
+                                    <span>添加 node_summary</span>
+                                    <select id="setting-if-add-node-summary">
+                                        <option value="yes">yes</option>
+                                        <option value="no">no</option>
+                                    </select>
+                                </label>
+                                <label class="settings-row">
+                                    <span>添加 node_text</span>
+                                    <select id="setting-if-add-node-text">
+                                        <option value="yes">yes</option>
+                                        <option value="no">no</option>
+                                    </select>
+                                </label>
+                                <label class="settings-row">
+                                    <span>添加 doc_description</span>
+                                    <select id="setting-if-add-doc-description">
+                                        <option value="yes">yes</option>
+                                        <option value="no">no</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </details>
+                        <div class="settings-footer">
+                            <button class="settings-reset-btn" type="button" id="resetProcessSettingsBtn">恢复默认</button>
+                            <span class="settings-meta" id="processSettingsSavedHint">自动保存</span>
+                        </div>
+                    </div>
+                </details>
                 <input type="file" id="uploadInput" hidden accept=".pdf">
-                <button onclick="document.getElementById('uploadInput').click()" 
-                    style="background:#f3f4f6; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; color:#374151;">
+                <button onclick="document.getElementById('uploadInput').click()" class="upload-btn">
                     📂 Upload PDF
                 </button>
             </div>
@@ -263,7 +548,181 @@
         chatHistory: []
     };
 
+    const PROCESS_SETTINGS_STORAGE_KEY = 'kiro.process.settings.v1';
+    const DEFAULT_PROCESS_SETTINGS = {
+        model: '',
+        answer_mode: 'standard',
+        force: false,
+        toc_check_pages: 25,
+        max_pages_per_node: 5,
+        max_tokens_per_node: 10000,
+        if_add_node_id: 'yes',
+        if_add_node_summary: 'yes',
+        if_add_node_text: 'no',
+        if_add_doc_description: 'yes',
+        structure_chunk_max_limit: 30000,
+        content_chunk_size: 20,
+        max_turns: 20,
+    };
+
     // --- 交互逻辑 ---
+
+    function _safePositiveInt(value, fallback) {
+        const n = Number.parseInt(value, 10);
+        return Number.isFinite(n) && n > 0 ? n : fallback;
+    }
+
+    function normalizeProcessSettings(raw) {
+        const src = raw && typeof raw === 'object' ? raw : {};
+        return {
+            model: typeof src.model === 'string' ? src.model.trim() : DEFAULT_PROCESS_SETTINGS.model,
+            answer_mode: src.answer_mode === 'pageindex' ? 'pageindex' : 'standard',
+            force: src.force === true || src.force === 'true',
+            toc_check_pages: _safePositiveInt(src.toc_check_pages, DEFAULT_PROCESS_SETTINGS.toc_check_pages),
+            max_pages_per_node: _safePositiveInt(src.max_pages_per_node, DEFAULT_PROCESS_SETTINGS.max_pages_per_node),
+            max_tokens_per_node: _safePositiveInt(src.max_tokens_per_node, DEFAULT_PROCESS_SETTINGS.max_tokens_per_node),
+            if_add_node_id: src.if_add_node_id === 'no' ? 'no' : 'yes',
+            if_add_node_summary: src.if_add_node_summary === 'no' ? 'no' : 'yes',
+            if_add_node_text: src.if_add_node_text === 'yes' ? 'yes' : 'no',
+            if_add_doc_description: src.if_add_doc_description === 'no' ? 'no' : 'yes',
+            structure_chunk_max_limit: _safePositiveInt(
+                src.structure_chunk_max_limit ?? src.structure_max_limit,
+                DEFAULT_PROCESS_SETTINGS.structure_chunk_max_limit
+            ),
+            content_chunk_size: _safePositiveInt(src.content_chunk_size, DEFAULT_PROCESS_SETTINGS.content_chunk_size),
+            max_turns: _safePositiveInt(src.max_turns, DEFAULT_PROCESS_SETTINGS.max_turns),
+        };
+    }
+
+    function loadProcessSettings() {
+        try {
+            const raw = localStorage.getItem(PROCESS_SETTINGS_STORAGE_KEY);
+            if (!raw) return { ...DEFAULT_PROCESS_SETTINGS };
+            return normalizeProcessSettings(JSON.parse(raw));
+        } catch (_err) {
+            return { ...DEFAULT_PROCESS_SETTINGS };
+        }
+    }
+
+    function saveProcessSettings(settings) {
+        const normalized = normalizeProcessSettings(settings);
+        localStorage.setItem(PROCESS_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+        const hint = document.getElementById('processSettingsSavedHint');
+        if (hint) hint.textContent = `已保存 ${new Date().toLocaleTimeString()}`;
+        return normalized;
+    }
+
+    function applyProcessSettingsToForm(settings) {
+        const s = normalizeProcessSettings(settings);
+        document.getElementById('setting-model').value = s.model;
+        document.getElementById('setting-answer-mode').value = s.answer_mode;
+        document.getElementById('setting-force').value = s.force ? 'true' : 'false';
+        document.getElementById('setting-toc-check-pages').value = String(s.toc_check_pages);
+        document.getElementById('setting-max-pages-per-node').value = String(s.max_pages_per_node);
+        document.getElementById('setting-max-tokens-per-node').value = String(s.max_tokens_per_node);
+        document.getElementById('setting-if-add-node-id').value = s.if_add_node_id;
+        document.getElementById('setting-if-add-node-summary').value = s.if_add_node_summary;
+        document.getElementById('setting-if-add-node-text').value = s.if_add_node_text;
+        document.getElementById('setting-if-add-doc-description').value = s.if_add_doc_description;
+        document.getElementById('setting-structure-chunk-max-limit').value = String(s.structure_chunk_max_limit);
+        document.getElementById('setting-content-chunk-size').value = String(s.content_chunk_size);
+        document.getElementById('setting-max-turns').value = String(s.max_turns);
+    }
+
+    function readProcessSettingsFromForm() {
+        return normalizeProcessSettings({
+            model: document.getElementById('setting-model').value,
+            answer_mode: document.getElementById('setting-answer-mode').value,
+            force: document.getElementById('setting-force').value,
+            toc_check_pages: document.getElementById('setting-toc-check-pages').value,
+            max_pages_per_node: document.getElementById('setting-max-pages-per-node').value,
+            max_tokens_per_node: document.getElementById('setting-max-tokens-per-node').value,
+            if_add_node_id: document.getElementById('setting-if-add-node-id').value,
+            if_add_node_summary: document.getElementById('setting-if-add-node-summary').value,
+            if_add_node_text: document.getElementById('setting-if-add-node-text').value,
+            if_add_doc_description: document.getElementById('setting-if-add-doc-description').value,
+            structure_chunk_max_limit: document.getElementById('setting-structure-chunk-max-limit').value,
+            content_chunk_size: document.getElementById('setting-content-chunk-size').value,
+            max_turns: document.getElementById('setting-max-turns').value,
+        });
+    }
+
+    function getProcessSettingsForRequest() {
+        const s = readProcessSettingsFromForm();
+        const promptFile = s.answer_mode === 'pageindex'
+            ? 'pageindex_system.txt'
+            : 'qa_system.txt';
+        return {
+            model: s.model || null,
+            prompt_file: promptFile,
+            force: s.force,
+            max_turns: s.max_turns,
+            options: {
+                toc_check_pages: s.toc_check_pages,
+                max_pages_per_node: s.max_pages_per_node,
+                max_tokens_per_node: s.max_tokens_per_node,
+                if_add_node_id: s.if_add_node_id,
+                if_add_node_summary: s.if_add_node_summary,
+                if_add_node_text: s.if_add_node_text,
+                if_add_doc_description: s.if_add_doc_description,
+                structure_chunk_max_limit: s.structure_chunk_max_limit,
+                content_chunk_size: s.content_chunk_size,
+            },
+        };
+    }
+
+    function initProcessSettingsUI() {
+        const loaded = loadProcessSettings();
+        applyProcessSettingsToForm(loaded);
+
+        const settingIds = [
+            'setting-model',
+            'setting-answer-mode',
+            'setting-force',
+            'setting-toc-check-pages',
+            'setting-max-pages-per-node',
+            'setting-max-tokens-per-node',
+            'setting-if-add-node-id',
+            'setting-if-add-node-summary',
+            'setting-if-add-node-text',
+            'setting-if-add-doc-description',
+            'setting-structure-chunk-max-limit',
+            'setting-content-chunk-size',
+            'setting-max-turns',
+        ];
+        settingIds.forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const eventName = el.tagName === 'SELECT' ? 'change' : 'input';
+            el.addEventListener(eventName, () => {
+                saveProcessSettings(readProcessSettingsFromForm());
+            });
+            if (eventName !== 'change') {
+                el.addEventListener('change', () => {
+                    saveProcessSettings(readProcessSettingsFromForm());
+                });
+            }
+        });
+
+        const resetBtn = document.getElementById('resetProcessSettingsBtn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                applyProcessSettingsToForm(DEFAULT_PROCESS_SETTINGS);
+                saveProcessSettings(DEFAULT_PROCESS_SETTINGS);
+            });
+        }
+
+        const dropdown = document.getElementById('processSettingsDropdown');
+        document.addEventListener('click', (event) => {
+            if (!dropdown || !dropdown.open) return;
+            if (!dropdown.contains(event.target)) {
+                dropdown.open = false;
+            }
+        });
+
+        const hint = document.getElementById('processSettingsSavedHint');
+        if (hint) hint.textContent = '已加载上次设置';
+    }
     
     // 输入框自动高度
     const tx = document.getElementById('userInput');
@@ -514,106 +973,187 @@
         renderPage(state.pageNum);
     }
 
+    function scrollMsgAreaToBottom() {
+        const msgArea = document.getElementById('msgArea');
+        msgArea.scrollTop = msgArea.scrollHeight;
+    }
+
+    function safeJsonForDisplay(value, maxChars = 12000) {
+        let text = '';
+        if (typeof value === 'string') {
+            text = value;
+        } else {
+            try {
+                text = JSON.stringify(value, null, 2);
+            } catch (_err) {
+                text = String(value);
+            }
+        }
+        if (text.length <= maxChars) return text;
+        const hidden = text.length - maxChars;
+        return `${text.slice(0, maxChars)}\n... [truncated ${hidden} chars]`;
+    }
+
+    function renderAnswerWithCites(container, rawAnswer, fallbackDocName) {
+        const withCites = (rawAnswer || '').replace(
+            /<cite\s+doc="([^"]+)"\s+page="(\d+)"\s*\/>/g,
+            (_full, citeDoc, page) => {
+                const doc = citeDoc || fallbackDocName || '';
+                return `<sup class="cite-sup" data-doc="${doc}" data-page="${page}">[p.${page}]</sup>`;
+            }
+        );
+        container.innerHTML = marked.parse(withCites);
+        container.querySelectorAll('.cite-sup').forEach(el => {
+            el.onclick = () => loadPdf(el.dataset.doc, parseInt(el.dataset.page, 10));
+        });
+    }
+
+    function setupAiLivePanel(contentDiv) {
+        contentDiv.innerHTML = `
+            <div class="ai-live-status">准备处理中...</div>
+            <div class="ai-answer"></div>
+            <details class="trace-panel" open>
+                <summary>过程记录（0）</summary>
+                <div class="trace-list"></div>
+            </details>
+        `;
+        return {
+            statusEl: contentDiv.querySelector('.ai-live-status'),
+            answerEl: contentDiv.querySelector('.ai-answer'),
+            tracePanelEl: contentDiv.querySelector('.trace-panel'),
+            traceSummaryEl: contentDiv.querySelector('.trace-panel summary'),
+            traceListEl: contentDiv.querySelector('.trace-list'),
+        };
+    }
+
+    function appendTraceItem(livePanel, title, payload, className = '') {
+        if (!livePanel || !livePanel.traceListEl) return;
+        const item = document.createElement('div');
+        item.className = `trace-item ${className}`.trim();
+        const titleEl = document.createElement('div');
+        titleEl.className = 'trace-item-title';
+        titleEl.textContent = title;
+        item.appendChild(titleEl);
+        if (payload !== undefined && payload !== null && payload !== '') {
+            const pre = document.createElement('pre');
+            pre.textContent = safeJsonForDisplay(payload);
+            item.appendChild(pre);
+        }
+        livePanel.traceListEl.appendChild(item);
+        const count = livePanel.traceListEl.children.length;
+        livePanel.traceSummaryEl.textContent = `过程记录（${count}）`;
+        scrollMsgAreaToBottom();
+    }
+
     // --- 消息发送 & Markdown渲染 ---
     async function send() {
         const input = document.getElementById('userInput');
         const text = input.value.trim();
         if(!text) return;
         console.log('[send] triggered, query:', text, 'doc:', state.currentDocName);
-        
+
         input.value = '';
-        input.style.height = 'auto'; // Reset height
-        
-        // 用户消息也渲染 Markdown (可选)
-        addMsg('user', text); 
-        
-        // AI 消息容器
-        const aiMsgDiv = addMsg('ai', '<span style="color:#999">Thinking...</span>');
+        input.style.height = 'auto';
+        addMsg('user', text);
+
+        const aiMsgDiv = addMsg('ai', '');
         const contentDiv = aiMsgDiv.querySelector('.markdown-body');
+        const livePanel = setupAiLivePanel(contentDiv);
         const historyForRequest = state.chatHistory.slice(-8);
         let finalAnswerForHistory = '';
-        
+
         try {
+            const processSettings = getProcessSettingsForRequest();
             const res = await fetch('/api/qa/stream', {
                 method:'POST', headers:{'Content-Type':'application/json'},
                 body: JSON.stringify({
-                    query: text, 
+                    query: text,
                     doc_name: state.currentDocName || null,
                     history: historyForRequest,
-                    force: false
+                    force: processSettings.force,
+                    model: processSettings.model,
+                    prompt_file: processSettings.prompt_file,
+                    max_turns: processSettings.max_turns,
+                    ...processSettings.options,
                 })
             });
 
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                contentDiv.innerHTML = `<span style="color:red">Error ${res.status}: ${err.detail || res.statusText}</span>`;
+                livePanel.statusEl.textContent = `请求失败: ${err.detail || res.statusText}`;
+                livePanel.statusEl.style.color = '#dc2626';
+                appendTraceItem(livePanel, 'HTTP Error', err.detail || res.statusText, 'trace-error');
                 return;
             }
-            
+
             const reader = res.body.getReader();
             const dec = new TextDecoder();
             let buf = '';
-            let gotAnyEvent = false;
-            
+
             while(true) {
                 const {value, done} = await reader.read();
                 if(done) break;
                 buf += dec.decode(value, { stream: true });
                 const blocks = buf.split('\n\n');
-                buf = blocks.pop(); // 保留未完成的块
+                buf = blocks.pop();
 
                 for(const block of blocks) {
-                    // SSE 格式：可能是 "event: message\ndata: {...}" 或直接 "data: {...}"
                     const dataLine = block.split('\n').find(l => l.startsWith('data: '));
                     if (!dataLine) continue;
-                    gotAnyEvent = true;
                     try {
                         const data = JSON.parse(dataLine.slice(6));
                         console.log('[SSE event]', data.type, data);
-                        
+
                         if (data.type === 'turn_start') {
-                            contentDiv.innerHTML = `<span style="color:#999">Turn ${data.turn}/${data.max_turns}...</span>`;
+                            livePanel.statusEl.textContent = `第 ${data.turn}/${data.max_turns} 轮`;
+                            appendTraceItem(livePanel, `Turn ${data.turn} 开始`, { doc_name: data.doc_name });
+                        } else if (data.type === 'assistant_note') {
+                            appendTraceItem(livePanel, `模型思路（Turn ${data.turn}）`, data.content, 'trace-thought');
                         } else if (data.type === 'tool_call') {
-                            contentDiv.innerHTML = `<span style="color:#999">Calling ${data.tool}...</span>`;
+                            livePanel.statusEl.textContent = `正在调用工具: ${data.tool}`;
+                            appendTraceItem(
+                                livePanel,
+                                `Tool: ${data.tool} (Turn ${data.turn})`,
+                                {
+                                    arguments: data.arguments || {},
+                                    result: data.result || data.result_summary || '',
+                                }
+                            );
+                        } else if (data.type === 'stage_start' || data.type === 'stage_done') {
+                            appendTraceItem(livePanel, `${data.type}: ${data.stage || 'unknown'}`, data);
                         } else if(data.type === 'final_answer') {
-                            // 用原始 answer（含 <cite> 标签），把标签替换成内联上标按钮
                             const rawAnswer = data.answer || '';
                             finalAnswerForHistory = (data.answer_clean || data.answer || '').trim();
                             const docName = data.doc_name || state.currentDocName;
-                            
-                            // 把 <cite doc="..." page="N"/> 替换成 HTML 上标（在 marked 处理前）
-                            const withCites = rawAnswer.replace(
-                                /<cite\s+doc="([^"]+)"\s+page="(\d+)"\s*\/>/g,
-                                (_, _doc, page) =>
-                                    `<sup class="cite-sup" data-doc="${docName}" data-page="${page}">[p.${page}]</sup>`
-                            );
-                            
-                            // marked 渲染 Markdown（cite 已是 HTML，marked 会保留 HTML）
-                            contentDiv.innerHTML = marked.parse(withCites);
-                            
-                            // 绑定上标点击事件
-                            contentDiv.querySelectorAll('.cite-sup').forEach(el => {
-                                el.onclick = () => loadPdf(el.dataset.doc, parseInt(el.dataset.page));
-                            });
-                            
-                            // 自动打开第一个引用页
-                            const firstCite = contentDiv.querySelector('.cite-sup');
-                            if(firstCite && docName) loadPdf(docName, parseInt(firstCite.dataset.page));
+                            renderAnswerWithCites(livePanel.answerEl, rawAnswer, docName);
+                            livePanel.statusEl.textContent = `已完成，共 ${data.total_turns || '?'} 轮`;
+                            livePanel.statusEl.style.color = '#059669';
 
-                            // QA 完成后刷新会话列表
+                            const firstCite = livePanel.answerEl.querySelector('.cite-sup');
+                            if(firstCite && docName) {
+                                loadPdf(docName, parseInt(firstCite.dataset.page, 10));
+                            }
                             loadSessions();
+                            scrollMsgAreaToBottom();
                         } else if (data.type === 'error') {
-                            contentDiv.innerHTML = `<span style="color:red">Error: ${data.message}</span>`;
+                            livePanel.statusEl.textContent = `错误: ${data.message}`;
+                            livePanel.statusEl.style.color = '#dc2626';
+                            appendTraceItem(livePanel, 'Error', data, 'trace-error');
                         }
-                    } catch(e){ console.error('SSE parse error', e, dataLine); }
+                    } catch(e){
+                        console.error('SSE parse error', e, dataLine);
+                    }
                 }
             }
+
             if (finalAnswerForHistory) {
                 state.chatHistory.push({ role: 'user', content: text });
                 state.chatHistory.push({ role: 'assistant', content: finalAnswerForHistory });
             }
         } catch(e) {
-            contentDiv.innerHTML = `<span style="color:red">Error: ${e.message}</span>`;
+            livePanel.statusEl.textContent = `Error: ${e.message}`;
+            livePanel.statusEl.style.color = '#dc2626';
+            appendTraceItem(livePanel, 'Client Error', e.message, 'trace-error');
         }
     }
 
@@ -648,7 +1188,14 @@
         if(!file) return;
         const aiDiv = addMsg('ai', 'Uploading & Processing...');
         
-        const form = new FormData(); form.append('file', file);
+        const processSettings = getProcessSettingsForRequest();
+        const form = new FormData();
+        form.append('file', file);
+        form.append('force', processSettings.force ? 'true' : 'false');
+        if (processSettings.model) {
+            form.append('model', processSettings.model);
+        }
+        form.append('process_options_json', JSON.stringify(processSettings.options));
         const res = await fetch('/api/process/upload', {method:'POST', body:form});
         const data = await res.json();
         
@@ -711,14 +1258,76 @@
         try {
             const r = await fetch('/api/sessions');
             const d = await r.json();
-            document.getElementById('sessionList').innerHTML = d.sessions.map(s =>
-                `<div class="session-item" onclick="restoreSession('${s.id}', '${s.doc_name}')">
-                    <div style="font-weight:500;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.doc_name}</div>
-                    <div style="font-size:12px;color:#999;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.query}</div>
-                </div>`
-            ).join('');
+            const list = document.getElementById('sessionList');
+            list.innerHTML = '';
+            d.sessions.forEach(s => {
+                const displayTitle = s.title || s.query || s.doc_name || s.id;
+                const item = document.createElement('div');
+                item.className = 'session-item';
+                item.dataset.id = s.id;
+                item.dataset.docName = s.doc_name;
+                item.innerHTML = `
+                    <div class="session-item-row">
+                        <div class="session-item-text" onclick="restoreSession('${s.id}', '${s.doc_name}')">
+                            <div class="session-title" title="${displayTitle}">${displayTitle}</div>
+                            <div class="session-doc">${s.doc_name}</div>
+                        </div>
+                        <button class="session-rename-btn" title="重命名" onclick="startRename(event, '${s.id}', this)">✏️</button>
+                        <button class="session-delete-btn" title="删除" onclick="deleteSession(event, '${s.id}')">🗑️</button>
+                    </div>
+                `;
+                list.appendChild(item);
+            });
         } catch(e) { console.error('loadSessions failed', e); }
     }
+
+    window.startRename = function(e, sessionId, btn) {
+        e.stopPropagation();
+        const item = btn.closest('.session-item');
+        const titleEl = item.querySelector('.session-title');
+        const currentTitle = titleEl.textContent.trim();
+        const row = item.querySelector('.session-item-row');
+
+        // 替换为 input
+        row.innerHTML = `
+            <input class="session-rename-input" value="${currentTitle.replace(/"/g, '&quot;')}" />
+            <button class="session-rename-confirm" title="确认">✓</button>
+            <button class="session-rename-cancel" title="取消">✕</button>
+        `;
+        const input = row.querySelector('.session-rename-input');
+        input.focus();
+        input.select();
+
+        async function confirm() {
+            const newTitle = input.value.trim();
+            if (newTitle && newTitle !== currentTitle) {
+                try {
+                    await fetch(`/api/sessions/${sessionId}/rename`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title: newTitle }),
+                    });
+                } catch(err) { console.error('rename failed', err); }
+            }
+            loadSessions();
+        }
+
+        row.querySelector('.session-rename-confirm').onclick = confirm;
+        row.querySelector('.session-rename-cancel').onclick = () => loadSessions();
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') confirm();
+            if (ev.key === 'Escape') loadSessions();
+        });
+    };
+
+    window.deleteSession = async function(e, sessionId) {
+        e.stopPropagation();
+        if (!window.confirm('确认删除这条历史记录？')) return;
+        try {
+            await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+            loadSessions();
+        } catch(err) { console.error('delete failed', err); }
+    };
 
     async function restoreSession(id, docName) {
         try {
@@ -731,20 +1340,32 @@
             // 恢复用户问题
             addMsg('user', s.query);
 
-            // 恢复 AI 回答（带内联引用）
+            // 恢复 AI 回答（带过程记录）
             const aiDiv = addMsg('ai', '');
             const contentDiv = aiDiv.querySelector('.markdown-body');
+            const livePanel = setupAiLivePanel(contentDiv);
             const rawAnswer = s.answer || '';
             const resolvedDoc = s.doc_name || docName;
-            const withCites = rawAnswer.replace(
-                /<cite\s+doc="([^"]+)"\s+page="(\d+)"\s*\/>/g,
-                (_, _doc, page) =>
-                    `<sup class="cite-sup" data-doc="${resolvedDoc}" data-page="${page}">[p.${page}]</sup>`
-            );
-            contentDiv.innerHTML = marked.parse(withCites);
-            contentDiv.querySelectorAll('.cite-sup').forEach(el => {
-                el.onclick = () => loadPdf(el.dataset.doc, parseInt(el.dataset.page));
-            });
+            livePanel.statusEl.textContent = `历史会话（${s.total_turns || 0} 轮）`;
+            livePanel.statusEl.style.color = '#4b5563';
+            renderAnswerWithCites(livePanel.answerEl, rawAnswer, resolvedDoc);
+
+            const traceList = Array.isArray(s.trace) ? s.trace : [];
+            if (traceList.length === 0) {
+                livePanel.tracePanelEl.open = false;
+                appendTraceItem(livePanel, '无工具调用记录', '');
+            } else {
+                traceList.forEach(item => {
+                    appendTraceItem(
+                        livePanel,
+                        `Tool: ${item.tool} (Turn ${item.turn})`,
+                        {
+                            arguments: item.arguments || {},
+                            result_summary: item.result_summary || '',
+                        }
+                    );
+                });
+            }
 
             // 更新状态并打开 PDF
             state.currentDocName = resolvedDoc;
@@ -758,6 +1379,7 @@
         }
     }
 
+    initProcessSettingsUI();
     loadSessions();
     loadDocs();
 

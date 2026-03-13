@@ -198,6 +198,13 @@ def process_document(
     pdf_path: str,
     force: bool = False,
     model: str | None = None,
+    toc_check_pages: int | None = None,
+    max_pages_per_node: int | None = None,
+    max_tokens_per_node: int | None = None,
+    if_add_node_id: str | None = None,
+    if_add_node_summary: str | None = None,
+    if_add_node_text: str | None = None,
+    if_add_doc_description: str | None = None,
     structure_max_limit: int = 30000,
     content_chunk_size: int = 20,
     progress_callback: ProgressCallback | None = None,
@@ -253,6 +260,20 @@ def process_document(
             kwargs: dict[str, Any] = {}
             if model:
                 kwargs["model"] = model
+            if toc_check_pages is not None:
+                kwargs["toc_check_page_num"] = toc_check_pages
+            if max_pages_per_node is not None:
+                kwargs["max_page_num_each_node"] = max_pages_per_node
+            if max_tokens_per_node is not None:
+                kwargs["max_token_num_each_node"] = max_tokens_per_node
+            if if_add_node_id is not None:
+                kwargs["if_add_node_id"] = if_add_node_id
+            if if_add_node_summary is not None:
+                kwargs["if_add_node_summary"] = if_add_node_summary
+            if if_add_node_text is not None:
+                kwargs["if_add_node_text"] = if_add_node_text
+            if if_add_doc_description is not None:
+                kwargs["if_add_doc_description"] = if_add_doc_description
             index_result = page_index(str(source_pdf), **kwargs)
             if not isinstance(index_result, dict) or "structure" not in index_result:
                 raise RuntimeError("page_index returned invalid result: missing 'structure'")
@@ -370,6 +391,15 @@ def ensure_document_ready(
     pdf: str | None = None,
     force: bool = False,
     model: str | None = None,
+    toc_check_pages: int | None = None,
+    max_pages_per_node: int | None = None,
+    max_tokens_per_node: int | None = None,
+    if_add_node_id: str | None = None,
+    if_add_node_summary: str | None = None,
+    if_add_node_text: str | None = None,
+    if_add_doc_description: str | None = None,
+    structure_max_limit: int = 30000,
+    content_chunk_size: int = 20,
     progress_callback: ProgressCallback | None = None,
 ) -> ProcessResult:
     """Ensure a document is processed and registered for QA."""
@@ -379,6 +409,15 @@ def ensure_document_ready(
             pdf_path=pdf,
             force=force,
             model=model,
+            toc_check_pages=toc_check_pages,
+            max_pages_per_node=max_pages_per_node,
+            max_tokens_per_node=max_tokens_per_node,
+            if_add_node_id=if_add_node_id,
+            if_add_node_summary=if_add_node_summary,
+            if_add_node_text=if_add_node_text,
+            if_add_doc_description=if_add_doc_description,
+            structure_max_limit=structure_max_limit,
+            content_chunk_size=content_chunk_size,
             progress_callback=progress_callback,
         )
 
@@ -404,5 +443,14 @@ def ensure_document_ready(
         pdf_path=str(resolved_pdf),
         force=force,
         model=model,
+        toc_check_pages=toc_check_pages,
+        max_pages_per_node=max_pages_per_node,
+        max_tokens_per_node=max_tokens_per_node,
+        if_add_node_id=if_add_node_id,
+        if_add_node_summary=if_add_node_summary,
+        if_add_node_text=if_add_node_text,
+        if_add_doc_description=if_add_doc_description,
+        structure_max_limit=structure_max_limit,
+        content_chunk_size=content_chunk_size,
         progress_callback=progress_callback,
     )

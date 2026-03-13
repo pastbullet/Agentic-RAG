@@ -161,7 +161,7 @@ class LLMAdapter:
         return LLMResponse(
             has_tool_calls=len(tool_calls) > 0,
             tool_calls=tool_calls,
-            text=msg.content if not tool_calls else None,
+            text=msg.content or None,
             usage=usage,
             raw_message=raw,
         )
@@ -226,7 +226,7 @@ class LLMAdapter:
         return LLMResponse(
             has_tool_calls=len(tool_calls) > 0,
             tool_calls=tool_calls,
-            text=combined_text if not tool_calls else None,
+            text=combined_text,
             usage=usage,
             raw_message=raw,
         )

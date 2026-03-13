@@ -110,11 +110,17 @@ def _make_result_summary(result: dict, max_len: int = 200) -> str:
 _PAGE_CONTENT_MAX_CHARS = 8000
 # get_document_structure 最大字符数
 _STRUCTURE_MAX_CHARS = 12000
+_STREAM_RESULT_MAX_CHARS = 20000
 _MAX_HISTORY_MESSAGES = 8
 _MAX_HISTORY_CHARS = 4000
 
 _TABLE_REF_PATTERN = re.compile(r"(?:\btable|表)\s*#?\s*(\d{1,4})", re.IGNORECASE)
 _EXPLICIT_PAGE_PATTERN = re.compile(r"(?:第\s*\d+\s*页|\bpage\s*\d+\b)", re.IGNORECASE)
+_FOLLOWUP_INVITE_PATTERN = re.compile(
+    r"(?is)"
+    r"(如果你|如需|需要的话|我可以继续|你还可以|你可以继续|欢迎继续提问|"
+    r"if you (?:want|need|would like)|i can continue|feel free to ask|let me know if)"
+)
 
 
 def _truncate_tool_result(result: dict, tool_name: str) -> dict:
@@ -144,6 +150,37 @@ def _truncate_tool_result(result: dict, tool_name: str) -> dict:
     return result
 
 
+def _truncate_result_for_stream(result: dict) -> dict:
+    """裁剪流式事件中的 tool 结果，避免 SSE 包过大。"""
+    raw = json.dumps(result, ensure_ascii=False)
+    if len(raw) <= _STREAM_RESULT_MAX_CHARS:
+        return result
+
+    content = result.get("content")
+    if isinstance(content, list):
+        preview_items: list[dict[str, Any]] = []
+        for item in content[:2]:
+            if not isinstance(item, dict):
+                continue
+            item_copy = dict(item)
+            text = item_copy.get("text")
+            if isinstance(text, str) and len(text) > 2000:
+                item_copy["text"] = text[:2000] + "\n...[truncated for stream]"
+            preview_items.append(item_copy)
+        return {
+            "_truncated_for_stream": True,
+            "_original_chars": len(raw),
+            "content": preview_items,
+            "next_steps": result.get("next_steps", ""),
+        }
+
+    return {
+        "_truncated_for_stream": True,
+        "_original_chars": len(raw),
+        "preview": raw[:_STREAM_RESULT_MAX_CHARS] + "...",
+    }
+
+
 def _normalize_history_messages(
     history_messages: list[dict[str, str]] | None,
 ) -> list[dict[str, str]]:
@@ -168,6 +205,32 @@ def _normalize_history_messages(
             text = text[:_MAX_HISTORY_CHARS] + "\n...[history truncated]"
         normalized.append({"role": role, "content": text})
     return normalized
+
+
+def _strip_followup_invites(answer: str) -> str:
+    """去掉答案结尾的“继续追问引导”段落，保持一次性总结风格。"""
+    text = (answer or "").strip()
+    if not text:
+        return text
+
+    parts = re.split(r"\n\s*\n", text)
+    changed = False
+    while parts:
+        tail = parts[-1].strip()
+        if not tail:
+            parts.pop()
+            changed = True
+            continue
+        if not _FOLLOWUP_INVITE_PATTERN.search(tail):
+            break
+        parts.pop()
+        changed = True
+
+    if not changed:
+        return text
+
+    cleaned = "\n\n".join(p for p in parts if p.strip()).strip()
+    return cleaned or text
 
 
 def _augment_query_with_disambiguation(query: str) -> str:
@@ -221,6 +284,7 @@ async def agentic_rag(
     model: str | None = None,
     max_turns: int = 15,
     prompt_file: str = "qa_system.txt",
+    system_prompt_override: str | None = None,
     progress_callback: ProgressCallback | None = None,
     history_messages: list[dict[str, str]] | None = None,
 ) -> RAGResponse:
@@ -252,7 +316,11 @@ async def agentic_rag(
     adapter = LLMAdapter(provider=provider, model=resolved_model)
 
     # 加载 system prompt 和 tool schemas
-    system_prompt = load_system_prompt(prompt_file)
+    override = (system_prompt_override or "").strip()
+    if override:
+        system_prompt = override
+    else:
+        system_prompt = load_system_prompt(prompt_file)
     tools = get_tool_schemas()
     normalized_history = _normalize_history_messages(history_messages)
     query_for_llm = _augment_query_with_disambiguation(query)
@@ -326,10 +394,21 @@ async def agentic_rag(
             # LLM 返回 tool_call → 执行工具并追加结果 (Req 6.2)
             # 先追加 assistant 的 raw_message（含 tool_calls）
             messages.append(response.raw_message)
+            note = (response.text or "").strip()
+            if note:
+                emit(
+                    {
+                        "type": "assistant_note",
+                        "turn": turn,
+                        "content": note,
+                    }
+                )
 
             # 支持并行 tool call (Req 5.7)
             for tc in response.tool_calls:
                 result = execute_tool(tc.name, tc.arguments)
+                stream_result = _truncate_result_for_stream(result)
+                result_summary = _make_result_summary(result)
 
                 # 追踪检索的页码
                 if tc.name == "get_page_content":
@@ -341,7 +420,7 @@ async def agentic_rag(
                         turn=turn,
                         tool=tc.name,
                         arguments=tc.arguments,
-                        result_summary=_make_result_summary(result),
+                        result_summary=result_summary,
                     )
                 )
                 emit(
@@ -350,7 +429,8 @@ async def agentic_rag(
                         "turn": turn,
                         "tool": tc.name,
                         "arguments": tc.arguments,
-                        "result_summary": _make_result_summary(result),
+                        "result_summary": result_summary,
+                        "result": stream_result,
                     }
                 )
 
@@ -368,7 +448,7 @@ async def agentic_rag(
                 messages.append(tool_msg)
         else:
             # LLM 返回纯文本 → 最终答案 (Req 6.3)
-            answer = response.text or ""
+            answer = _strip_followup_invites(response.text or "")
             # 去重 pages_retrieved
             unique_pages = sorted(set(pages_retrieved))
 

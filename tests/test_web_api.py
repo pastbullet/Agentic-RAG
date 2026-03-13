@@ -160,6 +160,7 @@ def test_qa_stream_emits_turn_and_final(client: TestClient, monkeypatch):
         query: str,
         doc_name: str,
         model: str | None = None,
+        prompt_file: str = "qa_system.txt",
         max_turns: int = 15,
         progress_callback=None,
         history_messages=None,

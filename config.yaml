@@ -1,6 +1,6 @@
 model: "gpt-4o-2024-11-20"
 toc_check_page_num: 25
-max_page_num_each_node: 5
+max_page_num_each_node: 20
 max_token_num_each_node: 10000
 if_add_node_id: "yes"
 if_add_node_summary: "yes"
