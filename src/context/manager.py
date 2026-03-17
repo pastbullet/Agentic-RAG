@@ -9,11 +9,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.context import id_gen
+from src.context.json_io import JSON_IO
 from src.context.stores.session_store import SessionStore
 from src.context.stores.turn_store import TurnStore
 from src.context.stores.document_store import DocumentStore
 from src.context.stores.evidence_store import EvidenceStore
-from src.context.stores.topic_store import TopicStore
 from src.context.updater import Updater
 
 
@@ -30,18 +30,44 @@ class ContextManager:
         # Internal sequence counters
         self._turn_seq = 0
         self._evidence_seq = 0
-        self._topic_seq = 0
 
         # Stores and updater are initialised in create_session
         self.session_store: SessionStore | None = None
         self.turn_store: TurnStore | None = None
         self.document_store: DocumentStore | None = None
         self.evidence_store: EvidenceStore | None = None
-        self.topic_store: TopicStore | None = None
         self.updater: Updater | None = None
 
         self._session_id: str | None = None
         self._session_dir: Path | None = None
+
+    def _init_components(self) -> None:
+        if self._session_dir is None:
+            raise RuntimeError("Session directory is not initialized")
+
+        self.session_store = SessionStore(self._session_dir)
+        self.turn_store = TurnStore(self._session_dir / "turns")
+        self.document_store = DocumentStore(self._session_dir)
+        self.evidence_store = EvidenceStore(self._session_dir / "evidences")
+
+        self.updater = Updater(
+            document_store=self.document_store,
+            turn_store=self.turn_store,
+            evidence_store=self.evidence_store,
+        )
+
+    @staticmethod
+    def _extract_max_seq(paths: list[Path], prefix: str) -> int:
+        max_seq = 0
+        for path in paths:
+            stem = path.stem
+            if not stem.startswith(prefix):
+                continue
+            try:
+                max_seq = max(max_seq, int(stem.split("_", 1)[1]))
+            except (IndexError, ValueError):
+                continue
+        return max_seq
 
     # ------------------------------------------------------------------
     # Public API
@@ -62,22 +88,47 @@ class ContextManager:
         """
         self._session_id = id_gen.generate_session_id()
         self._session_dir = self._base_dir / self._session_id
+        self._turn_seq = 0
+        self._evidence_seq = 0
 
-        self.session_store = SessionStore(self._session_dir)
-        self.turn_store = TurnStore(self._session_dir / "turns")
-        self.document_store = DocumentStore(self._session_dir)
-        self.evidence_store = EvidenceStore(self._session_dir / "evidences")
-        self.topic_store = TopicStore(self._session_dir / "topics")
-
-        self.updater = Updater(
-            document_store=self.document_store,
-            turn_store=self.turn_store,
-            evidence_store=self.evidence_store,
-            topic_store=self.topic_store,
-        )
+        self._init_components()
 
         self.session_store.create_session(self._session_id, doc_name)
         return self._session_id
+
+    def load_session(self, session_id: str) -> str:
+        """Load an existing session and restore internal counters."""
+        safe_session_id = Path(session_id).name
+        session_dir = self._base_dir / safe_session_id
+        session_path = session_dir / "session.json"
+        if not session_path.exists():
+            raise FileNotFoundError(f"Session not found: {safe_session_id}")
+
+        payload = JSON_IO.load(session_path)
+        if not isinstance(payload, dict):
+            raise ValueError(f"Invalid session file: {session_path}")
+
+        self._session_id = safe_session_id
+        self._session_dir = session_dir
+        self._init_components()
+
+        turns = payload.get("turns", [])
+        if isinstance(turns, list):
+            max_turn = 0
+            for turn_id in turns:
+                if not isinstance(turn_id, str) or not turn_id.startswith("turn_"):
+                    continue
+                try:
+                    max_turn = max(max_turn, int(turn_id.split("_", 1)[1]))
+                except (IndexError, ValueError):
+                    continue
+            self._turn_seq = max_turn
+        else:
+            self._turn_seq = 0
+
+        evidences_dir = session_dir / "evidences"
+        self._evidence_seq = self._extract_max_seq(list(evidences_dir.glob("*.json")), "ev")
+        return safe_session_id
 
     def create_turn(self, user_query: str, doc_name: str) -> str:
         """Create a new turn within the current session.
@@ -176,3 +227,7 @@ class ContextManager:
     def finalize_session(self) -> None:
         """Finalise the session by marking it as completed."""
         self.session_store.finalize()
+
+    @property
+    def session_dir(self) -> Path | None:
+        return self._session_dir

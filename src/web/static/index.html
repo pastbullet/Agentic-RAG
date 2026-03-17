@@ -540,6 +540,7 @@
         pageNum: 1,
         zoomFactor: 1.0,
         currentDocName: null,
+        contextSessionId: null,
         loadedDocName: null,
         pdfPanelWidth: null,
         pageWrappers: [],
@@ -1061,6 +1062,7 @@
         const livePanel = setupAiLivePanel(contentDiv);
         const historyForRequest = state.chatHistory.slice(-8);
         let finalAnswerForHistory = '';
+        let latestContextSessionId = state.contextSessionId;
 
         try {
             const processSettings = getProcessSettingsForRequest();
@@ -1070,6 +1072,7 @@
                     query: text,
                     doc_name: state.currentDocName || null,
                     history: historyForRequest,
+                    context_session_id: state.contextSessionId || null,
                     force: processSettings.force,
                     model: processSettings.model,
                     prompt_file: processSettings.prompt_file,
@@ -1125,6 +1128,10 @@
                             const rawAnswer = data.answer || '';
                             finalAnswerForHistory = (data.answer_clean || data.answer || '').trim();
                             const docName = data.doc_name || state.currentDocName;
+                            if (data.context_session_id) {
+                                latestContextSessionId = data.context_session_id;
+                                state.contextSessionId = data.context_session_id;
+                            }
                             renderAnswerWithCites(livePanel.answerEl, rawAnswer, docName);
                             livePanel.statusEl.textContent = `已完成，共 ${data.total_turns || '?'} 轮`;
                             livePanel.statusEl.style.color = '#059669';
@@ -1133,8 +1140,14 @@
                             if(firstCite && docName) {
                                 loadPdf(docName, parseInt(firstCite.dataset.page, 10));
                             }
-                            loadSessions();
                             scrollMsgAreaToBottom();
+                        } else if (data.type === 'done') {
+                            const result = data.result || {};
+                            if (result.context_session_id) {
+                                latestContextSessionId = result.context_session_id;
+                                state.contextSessionId = result.context_session_id;
+                            }
+                            loadConversations();
                         } else if (data.type === 'error') {
                             livePanel.statusEl.textContent = `错误: ${data.message}`;
                             livePanel.statusEl.style.color = '#dc2626';
@@ -1147,6 +1160,9 @@
             }
 
             if (finalAnswerForHistory) {
+                if (latestContextSessionId) {
+                    state.contextSessionId = latestContextSessionId;
+                }
                 state.chatHistory.push({ role: 'user', content: text });
                 state.chatHistory.push({ role: 'assistant', content: finalAnswerForHistory });
             }
@@ -1201,9 +1217,11 @@
         
         if(data.ok) {
             state.currentDocName = data.result.doc_name;
+            state.contextSessionId = null;
+            state.chatHistory = [];
             aiDiv.querySelector('.markdown-body').innerHTML = `<p>已完成处理: <strong>${data.result.doc_name}</strong></p>`;
             loadPdf(data.result.doc_name);
-            loadSessions();
+            loadConversations();
             loadDocs(); // 刷新文档列表
         }
     }
@@ -1226,6 +1244,7 @@
 
     function selectDoc(docName) {
         state.currentDocName = docName;
+        state.contextSessionId = null;
         state.chatHistory = [];
         document.getElementById('docTitle').innerHTML = `📄 ${docName}`;
         // 刷新高亮
@@ -1243,6 +1262,7 @@
 
     function newChat() {
         state.currentDocName = null;
+        state.contextSessionId = null;
         state.chatHistory = [];
         state.pdfDoc = null;
         state.loadedDocName = null;
@@ -1254,13 +1274,13 @@
     }
 
     // --- 加载历史 ---
-    async function loadSessions() {
+    async function loadConversations() {
         try {
-            const r = await fetch('/api/sessions');
+            const r = await fetch('/api/conversations');
             const d = await r.json();
             const list = document.getElementById('sessionList');
             list.innerHTML = '';
-            d.sessions.forEach(s => {
+            d.conversations.forEach(s => {
                 const displayTitle = s.title || s.query || s.doc_name || s.id;
                 const item = document.createElement('div');
                 item.className = 'session-item';
@@ -1268,17 +1288,17 @@
                 item.dataset.docName = s.doc_name;
                 item.innerHTML = `
                     <div class="session-item-row">
-                        <div class="session-item-text" onclick="restoreSession('${s.id}', '${s.doc_name}')">
+                        <div class="session-item-text" onclick="restoreConversation('${s.id}', '${s.doc_name}')">
                             <div class="session-title" title="${displayTitle}">${displayTitle}</div>
                             <div class="session-doc">${s.doc_name}</div>
                         </div>
                         <button class="session-rename-btn" title="重命名" onclick="startRename(event, '${s.id}', this)">✏️</button>
-                        <button class="session-delete-btn" title="删除" onclick="deleteSession(event, '${s.id}')">🗑️</button>
+                        <button class="session-delete-btn" title="删除" onclick="deleteConversation(event, '${s.id}')">🗑️</button>
                     </div>
                 `;
                 list.appendChild(item);
             });
-        } catch(e) { console.error('loadSessions failed', e); }
+        } catch(e) { console.error('loadConversations failed', e); }
     }
 
     window.startRename = function(e, sessionId, btn) {
@@ -1302,85 +1322,106 @@
             const newTitle = input.value.trim();
             if (newTitle && newTitle !== currentTitle) {
                 try {
-                    await fetch(`/api/sessions/${sessionId}/rename`, {
+                    await fetch(`/api/conversations/${sessionId}/rename`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ title: newTitle }),
                     });
                 } catch(err) { console.error('rename failed', err); }
             }
-            loadSessions();
+            loadConversations();
         }
 
         row.querySelector('.session-rename-confirm').onclick = confirm;
-        row.querySelector('.session-rename-cancel').onclick = () => loadSessions();
+        row.querySelector('.session-rename-cancel').onclick = () => loadConversations();
         input.addEventListener('keydown', (ev) => {
             if (ev.key === 'Enter') confirm();
-            if (ev.key === 'Escape') loadSessions();
+            if (ev.key === 'Escape') loadConversations();
         });
     };
 
-    window.deleteSession = async function(e, sessionId) {
+    window.deleteConversation = async function(e, sessionId) {
         e.stopPropagation();
         if (!window.confirm('确认删除这条历史记录？')) return;
         try {
-            await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
-            loadSessions();
+            await fetch(`/api/conversations/${sessionId}`, { method: 'DELETE' });
+            loadConversations();
         } catch(err) { console.error('delete failed', err); }
     };
 
-    async function restoreSession(id, docName) {
+    async function restoreConversation(id, docName) {
         try {
-            const r = await fetch(`/api/sessions/${id}`);
-            const s = await r.json();
+            const r = await fetch(`/api/conversations/${id}`);
+            const conversation = await r.json();
+            const entries = Array.isArray(conversation.entries) ? conversation.entries : [];
 
             // 清空聊天区
             document.getElementById('msgArea').innerHTML = '';
+            const resolvedDoc = conversation.doc_name || docName;
 
-            // 恢复用户问题
-            addMsg('user', s.query);
+            entries.forEach((entry, index) => {
+                if (entry.query) {
+                    addMsg('user', entry.query);
+                }
 
-            // 恢复 AI 回答（带过程记录）
-            const aiDiv = addMsg('ai', '');
-            const contentDiv = aiDiv.querySelector('.markdown-body');
-            const livePanel = setupAiLivePanel(contentDiv);
-            const rawAnswer = s.answer || '';
-            const resolvedDoc = s.doc_name || docName;
-            livePanel.statusEl.textContent = `历史会话（${s.total_turns || 0} 轮）`;
-            livePanel.statusEl.style.color = '#4b5563';
-            renderAnswerWithCites(livePanel.answerEl, rawAnswer, resolvedDoc);
+                const aiDiv = addMsg('ai', '');
+                const contentDiv = aiDiv.querySelector('.markdown-body');
+                const livePanel = setupAiLivePanel(contentDiv);
+                const rawAnswer = entry.answer || '';
+                livePanel.statusEl.textContent = `历史会话（${index + 1}/${entries.length}）`;
+                livePanel.statusEl.style.color = '#4b5563';
+                renderAnswerWithCites(livePanel.answerEl, rawAnswer, entry.doc_name || resolvedDoc);
 
-            const traceList = Array.isArray(s.trace) ? s.trace : [];
-            if (traceList.length === 0) {
-                livePanel.tracePanelEl.open = false;
-                appendTraceItem(livePanel, '无工具调用记录', '');
-            } else {
-                traceList.forEach(item => {
-                    appendTraceItem(
-                        livePanel,
-                        `Tool: ${item.tool} (Turn ${item.turn})`,
-                        {
-                            arguments: item.arguments || {},
-                            result_summary: item.result_summary || '',
-                        }
-                    );
-                });
-            }
+                const traceList = Array.isArray(entry.trace) ? entry.trace : [];
+                if (traceList.length === 0) {
+                    livePanel.tracePanelEl.open = false;
+                    appendTraceItem(livePanel, '无工具调用记录', '');
+                } else {
+                    traceList.forEach(item => {
+                        appendTraceItem(
+                            livePanel,
+                            `Tool: ${item.tool} (Turn ${item.turn})`,
+                            {
+                                arguments: item.arguments || {},
+                                result_summary: item.result_summary || '',
+                            }
+                        );
+                    });
+                }
+            });
 
             // 更新状态并打开 PDF
             state.currentDocName = resolvedDoc;
-            state.chatHistory = [
-                { role: 'user', content: (s.query || '').trim() },
-                { role: 'assistant', content: ((s.answer_clean || s.answer || '').trim()) },
-            ].filter(item => item.content);
-            if (resolvedDoc) loadPdf(resolvedDoc, s.pages_retrieved?.[0] || 1);
+            state.contextSessionId = conversation.context_session_id || null;
+            state.chatHistory = [];
+            entries.forEach(entry => {
+                if ((entry.query || '').trim()) {
+                    state.chatHistory.push({ role: 'user', content: entry.query.trim() });
+                }
+                const answerText = (entry.answer_clean || entry.answer || '').trim();
+                if (answerText) {
+                    state.chatHistory.push({ role: 'assistant', content: answerText });
+                }
+            });
+            document.getElementById('docTitle').innerHTML = `📄 ${resolvedDoc}`;
+            document.querySelectorAll('.doc-item').forEach(el => {
+                el.classList.toggle('active', el.textContent.trim() === resolvedDoc);
+            });
+            const latestEntry = entries.length > 0 ? entries[entries.length - 1] : null;
+            const firstCitePage = latestEntry && Array.isArray(latestEntry.citations) && latestEntry.citations.length > 0
+                ? parseInt(latestEntry.citations[0].page, 10)
+                : null;
+            const fallbackPage = latestEntry && Array.isArray(latestEntry.pages_retrieved) && latestEntry.pages_retrieved.length > 0
+                ? latestEntry.pages_retrieved[0]
+                : 1;
+            if (resolvedDoc) loadPdf(resolvedDoc, firstCitePage || fallbackPage || 1);
         } catch(e) {
-            console.error('restoreSession failed', e);
+            console.error('restoreConversation failed', e);
         }
     }
 
     initProcessSettingsUI();
-    loadSessions();
+    loadConversations();
     loadDocs();
 
 </script>

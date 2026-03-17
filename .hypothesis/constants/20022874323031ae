@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/context/reuse/builder.py
+# hypothesis_version: 6.151.9
+
+[4000, '## 已探索节点', '## 已提取的证据', '## 已读页面摘要', '*.json', '[\\u4e00-\\u9fff]', '[a-z0-9]{2,}', 'content', 'discovered', 'doc_name', 'document_state.json', 'documents', 'end_index', 'evidence_id', 'evidences', 'explored_structure', 'extracted_in_turn', 'node_id', 'nodes', 'page_num', 'page_numbers', 'page_summaries', 'read_complete', 'read_pages', 'reading', 'source_page', 'start_index', 'status', 'summary', 'summary_text', 'title', 'total_chars', 'visited_parts']

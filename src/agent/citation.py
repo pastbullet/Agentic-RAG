@@ -14,10 +14,44 @@ from src.models import Citation
 _CITE_PATTERN = re.compile(r'<cite\s+doc="([^"]+)"\s+page="(\d+)"\s*/>')
 
 
+def _extract_sentence_context(answer: str, cite_start: int, max_len: int = 200) -> str:
+    """Extract the sentence or clause that a citation supports.
+
+    Walks backward from *cite_start* to find a sentence boundary
+    (period / newline / list marker), then forward to the cite tag.
+    Falls back to the last *max_len* characters if no boundary is found.
+    Strips any embedded ``<cite …/>`` tags from the extracted text so
+    that evidence content is clean prose, not markup fragments.
+    """
+    # Search backward for a sentence boundary
+    search_start = max(0, cite_start - 500)
+    region = answer[search_start:cite_start]
+
+    # Find the last sentence-ending boundary
+    best = -1
+    for pattern in (r"\n", r"。", r"\.\s", r"；", r";\s", r"- \*\*"):
+        for m in re.finditer(pattern, region):
+            if m.end() > best:
+                best = m.end()
+
+    if best >= 0:
+        raw = region[best:].strip()
+    else:
+        raw = region[-max_len:].strip()
+
+    # Truncate if still too long
+    if len(raw) > max_len:
+        raw = raw[-max_len:]
+
+    # Remove any embedded cite tags so evidence is clean text
+    clean = _CITE_PATTERN.sub("", raw).strip()
+    return clean
+
+
 def extract_citations(answer: str) -> list[Citation]:
     """从答案文本中解析所有 ``<cite doc="..." page="..."/>`` 标签。
 
-    对每个匹配，提取标签前约 50 个字符作为 context 片段。
+    对每个匹配，提取标签所支持的语句作为 context 片段（去除内嵌 cite 标签）。
 
     Returns:
         Citation 列表，每个包含 doc_name、page 和 context。
@@ -26,9 +60,7 @@ def extract_citations(answer: str) -> list[Citation]:
     for match in _CITE_PATTERN.finditer(answer):
         doc_name = match.group(1)
         page = int(match.group(2))
-        # 提取标签前 ~50 字符作为上下文
-        start = max(0, match.start() - 50)
-        context = answer[start : match.start()].strip()
+        context = _extract_sentence_context(answer, match.start())
         citations.append(Citation(doc_name=doc_name, page=page, context=context))
     return citations
 

@@ -32,6 +32,12 @@ def _parse_sse(raw: str) -> list[dict]:
     return events
 
 
+def _write_session_log(base_dir: Path, session_id: str, payload: dict) -> Path:
+    path = base_dir / "logs" / "sessions" / f"{session_id}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(web_app, "PROJECT_ROOT", tmp_path)
@@ -42,20 +48,17 @@ def client(tmp_path: Path, monkeypatch):
 
 
 def test_sessions_endpoints(client: TestClient, tmp_path: Path):
-    fp = tmp_path / "logs" / "sessions" / "20260308_120000.json"
-    fp.write_text(
-        json.dumps(
-            {
-                "timestamp": "20260308_120000",
-                "doc_name": "FC-LS.pdf",
-                "query": "q",
-                "total_turns": 2,
-                "pages_retrieved": [1, 2],
-                "answer": "a",
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_session_log(
+        tmp_path,
+        "20260308_120000",
+        {
+            "timestamp": "20260308_120000",
+            "doc_name": "FC-LS.pdf",
+            "query": "q",
+            "total_turns": 2,
+            "pages_retrieved": [1, 2],
+            "answer": "a",
+        },
     )
 
     resp = client.get("/api/sessions")
@@ -66,6 +69,166 @@ def test_sessions_endpoints(client: TestClient, tmp_path: Path):
     detail = client.get("/api/sessions/20260308_120000")
     assert detail.status_code == 200
     assert detail.json()["doc_name"] == "FC-LS.pdf"
+
+
+def test_conversations_group_by_context_session_id(client: TestClient, tmp_path: Path):
+    _write_session_log(
+        tmp_path,
+        "20260308_120000",
+        {
+            "timestamp": "20260308_120000",
+            "doc_name": "FC-LS.pdf",
+            "query": "Q1",
+            "answer": "A1",
+            "context_session_id": "sess_1",
+        },
+    )
+    _write_session_log(
+        tmp_path,
+        "20260308_120100",
+        {
+            "timestamp": "20260308_120100",
+            "doc_name": "FC-LS.pdf",
+            "query": "Q2",
+            "answer": "A2",
+            "title": "Merged chat",
+            "context_session_id": "sess_1",
+        },
+    )
+
+    resp = client.get("/api/conversations")
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    assert len(payload["conversations"]) == 1
+    conversation = payload["conversations"][0]
+    assert conversation["id"] == "sess_1"
+    assert conversation["entry_count"] == 2
+    assert conversation["title"] == "Merged chat"
+    assert conversation["query"] == "Q2"
+
+
+def test_conversation_detail_returns_entries_in_time_order(client: TestClient, tmp_path: Path):
+    _write_session_log(
+        tmp_path,
+        "20260308_120200",
+        {
+            "timestamp": "20260308_120200",
+            "doc_name": "FC-LS.pdf",
+            "query": "Q2",
+            "answer": "A2",
+            "answer_clean": "A2",
+            "pages_retrieved": [8],
+            "context_session_id": "sess_2",
+        },
+    )
+    _write_session_log(
+        tmp_path,
+        "20260308_120100",
+        {
+            "timestamp": "20260308_120100",
+            "doc_name": "FC-LS.pdf",
+            "query": "Q1",
+            "answer": "A1",
+            "answer_clean": "A1",
+            "pages_retrieved": [7],
+            "context_session_id": "sess_2",
+        },
+    )
+
+    resp = client.get("/api/conversations/sess_2")
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    assert payload["id"] == "sess_2"
+    assert [entry["query"] for entry in payload["entries"]] == ["Q1", "Q2"]
+    assert payload["entries"][0]["pages_retrieved"] == [7]
+    assert payload["entries"][1]["pages_retrieved"] == [8]
+
+
+def test_conversation_rename_updates_all_grouped_logs(client: TestClient, tmp_path: Path):
+    _write_session_log(
+        tmp_path,
+        "20260308_120000",
+        {
+            "timestamp": "20260308_120000",
+            "doc_name": "FC-LS.pdf",
+            "query": "Q1",
+            "answer": "A1",
+            "context_session_id": "sess_rename",
+        },
+    )
+    _write_session_log(
+        tmp_path,
+        "20260308_120100",
+        {
+            "timestamp": "20260308_120100",
+            "doc_name": "FC-LS.pdf",
+            "query": "Q2",
+            "answer": "A2",
+            "context_session_id": "sess_rename",
+        },
+    )
+
+    resp = client.patch("/api/conversations/sess_rename/rename", json={"title": "Renamed"})
+    assert resp.status_code == 200
+
+    for session_id in ("20260308_120000", "20260308_120100"):
+        payload = json.loads((tmp_path / "logs" / "sessions" / f"{session_id}.json").read_text("utf-8"))
+        assert payload["title"] == "Renamed"
+
+
+def test_conversation_delete_removes_grouped_logs(client: TestClient, tmp_path: Path):
+    _write_session_log(
+        tmp_path,
+        "20260308_120000",
+        {
+            "timestamp": "20260308_120000",
+            "doc_name": "FC-LS.pdf",
+            "query": "Q1",
+            "answer": "A1",
+            "context_session_id": "sess_delete",
+        },
+    )
+    _write_session_log(
+        tmp_path,
+        "20260308_120100",
+        {
+            "timestamp": "20260308_120100",
+            "doc_name": "FC-LS.pdf",
+            "query": "Q2",
+            "answer": "A2",
+            "context_session_id": "sess_delete",
+        },
+    )
+
+    resp = client.delete("/api/conversations/sess_delete")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == 2
+    assert list((tmp_path / "logs" / "sessions").glob("*.json")) == []
+
+
+def test_old_session_without_context_session_id_still_forms_own_conversation(client: TestClient, tmp_path: Path):
+    _write_session_log(
+        tmp_path,
+        "20260308_120000",
+        {
+            "timestamp": "20260308_120000",
+            "doc_name": "FC-LS.pdf",
+            "query": "Legacy",
+            "answer": "Old answer",
+        },
+    )
+
+    resp = client.get("/api/conversations")
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    assert len(payload["conversations"]) == 1
+    assert payload["conversations"][0]["id"] == "20260308_120000"
+    detail = client.get("/api/conversations/20260308_120000")
+    assert detail.status_code == 200
+    assert detail.json()["entries"][0]["query"] == "Legacy"
 
 
 def test_process_path_sync(client: TestClient, monkeypatch):
@@ -164,7 +327,10 @@ def test_qa_stream_emits_turn_and_final(client: TestClient, monkeypatch):
         max_turns: int = 15,
         progress_callback=None,
         history_messages=None,
+        enable_context_reuse=None,
+        context_session_id=None,
     ):
+        assert context_session_id == "sess_prev"
         if progress_callback:
             progress_callback({"type": "turn_start", "turn": 1, "max_turns": max_turns, "doc_name": doc_name})
             progress_callback(
@@ -186,6 +352,7 @@ def test_qa_stream_emits_turn_and_final(client: TestClient, monkeypatch):
                     "trace": [],
                     "pages_retrieved": [1],
                     "total_turns": 1,
+                    "context_session_id": "sess_1",
                 }
             )
 
@@ -196,6 +363,7 @@ def test_qa_stream_emits_turn_and_final(client: TestClient, monkeypatch):
             trace=[],
             pages_retrieved=[1],
             total_turns=1,
+            context_session_id="sess_1",
         )
 
     monkeypatch.setattr(web_app, "ensure_document_ready", fake_ensure_document_ready)
@@ -204,7 +372,7 @@ def test_qa_stream_emits_turn_and_final(client: TestClient, monkeypatch):
     with client.stream(
         "POST",
         "/api/qa/stream",
-        json={"doc_name": "FC-LS.pdf", "query": "Q"},
+        json={"doc_name": "FC-LS.pdf", "query": "Q", "context_session_id": "sess_prev"},
     ) as resp:
         assert resp.status_code == 200
         raw = "".join(resp.iter_text())
@@ -216,3 +384,7 @@ def test_qa_stream_emits_turn_and_final(client: TestClient, monkeypatch):
     assert "tool_call" in types
     assert "final_answer" in types
     assert types[-1] == "done"
+    final_answer = next(event for event in events if event.get("type") == "final_answer")
+    done_event = events[-1]
+    assert final_answer["context_session_id"] == "sess_1"
+    assert done_event["result"]["context_session_id"] == "sess_1"

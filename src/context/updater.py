@@ -12,7 +12,6 @@ import re
 
 from src.context.stores.document_store import DocumentStore
 from src.context.stores.evidence_store import EvidenceStore
-from src.context.stores.topic_store import TopicStore
 from src.context.stores.turn_store import TurnStore
 
 logger = logging.getLogger(__name__)
@@ -75,12 +74,10 @@ class Updater:
         document_store: DocumentStore,
         turn_store: TurnStore,
         evidence_store: EvidenceStore,
-        topic_store: TopicStore,
     ) -> None:
         self._document_store = document_store
         self._turn_store = turn_store
         self._evidence_store = evidence_store
-        self._topic_store = topic_store
 
     # ------------------------------------------------------------------
     # Public API
@@ -230,9 +227,16 @@ class Updater:
             self._document_store.update_read_pages(doc_id, pages)
 
         # --- Update node read status ---
-        node_id = result.get("node_id")
-        if node_id:
-            self._document_store.update_node_read_status(doc_id, node_id)
+        if pages and doc_id:
+            try:
+                for node_id in self._document_store.find_nodes_covering_pages(doc_id, pages):
+                    self._document_store.update_node_read_status(doc_id, node_id)
+            except Exception as exc:
+                logger.warning(
+                    "Node status update failed for doc '%s': %s",
+                    doc_id,
+                    exc,
+                )
 
         # --- Write back retrieval trace ---
         self._turn_store.update_retrieval_trace(

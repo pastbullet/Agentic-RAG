@@ -335,3 +335,33 @@ class DocumentStore:
             node_state["status"] = "read_complete"
 
         JSON_IO.save(node_path, node_state)
+
+    def find_nodes_covering_pages(self, doc_id: str, pages: list[int]) -> list[str]:
+        """Return node IDs whose page range covers any of *pages*."""
+        nodes_dir = self._nodes_dir(doc_id)
+        if not nodes_dir.exists() or not pages:
+            return []
+
+        matched: list[str] = []
+        seen: set[str] = set()
+        page_set = set(pages)
+
+        for node_path in sorted(nodes_dir.glob("*.json")):
+            node_state = JSON_IO.load(node_path)
+            if not isinstance(node_state, dict):
+                continue
+
+            start = node_state.get("start_index")
+            end = node_state.get("end_index")
+            if not isinstance(start, int) or not isinstance(end, int):
+                continue
+            if not any(start <= page <= end for page in page_set):
+                continue
+
+            node_id = node_state.get("node_id", node_path.stem)
+            if not isinstance(node_id, str) or node_id in seen:
+                continue
+            seen.add(node_id)
+            matched.append(node_id)
+
+        return matched

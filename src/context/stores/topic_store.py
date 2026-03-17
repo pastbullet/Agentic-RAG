@@ -1,4 +1,4 @@
-"""Topic Store — manages topic_xxxx.json files within a session's topics/ directory.
+"""DEPRECATED: Topic Store — manages topic_xxxx.json files within a session's topics/ directory.
 
 Responsible for creating topic snapshots, tracking related turns,
 and updating topic associations (nodes, evidences, open gaps).

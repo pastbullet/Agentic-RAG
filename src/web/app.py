@@ -70,6 +70,8 @@ class QARequest(BaseModel):
     structure_max_limit: int | None = None
     structure_chunk_max_limit: int | None = None
     content_chunk_size: int | None = None
+    enable_context_reuse: bool | None = None
+    context_session_id: str | None = None
 
 
 def _normalize_doc_name(doc_name: str) -> str:
@@ -100,6 +102,7 @@ def _rag_response_to_dict(response: Any) -> dict[str, Any]:
         "trace": [t.model_dump() for t in response.trace],
         "pages_retrieved": response.pages_retrieved,
         "total_turns": response.total_turns,
+        "context_session_id": getattr(response, "context_session_id", None),
     }
 
 
@@ -115,6 +118,98 @@ def _load_session(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"Failed to parse session file: {path.name}") from exc
+
+
+def _session_timestamp(session_id: str, payload: dict[str, Any]) -> str:
+    value = payload.get("timestamp", session_id)
+    return value if isinstance(value, str) and value else session_id
+
+
+def _conversation_id_for_session(session_id: str, payload: dict[str, Any]) -> str:
+    context_session_id = payload.get("context_session_id")
+    if isinstance(context_session_id, str) and context_session_id.strip():
+        return context_session_id.strip()
+    return session_id
+
+
+def _iter_session_records() -> list[dict[str, Any]]:
+    SESSION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    records: list[dict[str, Any]] = []
+    for fp in sorted(SESSION_LOG_DIR.glob("*.json"), reverse=True):
+        payload = _load_session(fp)
+        session_id = fp.stem
+        records.append(
+            {
+                "id": session_id,
+                "path": fp,
+                "payload": payload,
+                "timestamp": _session_timestamp(session_id, payload),
+                "conversation_id": _conversation_id_for_session(session_id, payload),
+            }
+        )
+    return records
+
+
+def _build_conversation_summary(conversation_id: str, records: list[dict[str, Any]]) -> dict[str, Any]:
+    ordered = sorted(records, key=lambda item: item["timestamp"])
+    latest = ordered[-1]
+    latest_payload = latest["payload"]
+
+    title = ""
+    for item in reversed(ordered):
+        value = item["payload"].get("title", "")
+        if isinstance(value, str) and value.strip():
+            title = value.strip()
+            break
+
+    latest_query = latest_payload.get("query", "")
+    latest_doc_name = latest_payload.get("doc_name", "")
+    latest_context_session_id = latest_payload.get("context_session_id")
+    latest_pages = latest_payload.get("pages_retrieved", [])
+    latest_turns = latest_payload.get("total_turns", 0)
+
+    return {
+        "id": conversation_id,
+        "context_session_id": latest_context_session_id if isinstance(latest_context_session_id, str) else None,
+        "timestamp": latest["timestamp"],
+        "doc_name": latest_doc_name if isinstance(latest_doc_name, str) else "",
+        "query": latest_query if isinstance(latest_query, str) else "",
+        "title": title,
+        "total_turns": latest_turns if isinstance(latest_turns, int) else 0,
+        "pages_retrieved": latest_pages if isinstance(latest_pages, list) else [],
+        "entry_count": len(ordered),
+        "session_ids": [item["id"] for item in ordered],
+    }
+
+
+def _build_conversation_entry(record: dict[str, Any]) -> dict[str, Any]:
+    payload = record["payload"]
+    return {
+        "id": record["id"],
+        "timestamp": record["timestamp"],
+        "doc_name": payload.get("doc_name", ""),
+        "query": payload.get("query", ""),
+        "title": payload.get("title", ""),
+        "answer": payload.get("answer", ""),
+        "answer_clean": payload.get("answer_clean", ""),
+        "citations": payload.get("citations", []),
+        "trace": payload.get("trace", []),
+        "pages_retrieved": payload.get("pages_retrieved", []),
+        "total_turns": payload.get("total_turns", 0),
+        "context_session_id": payload.get("context_session_id"),
+    }
+
+
+def _get_conversation_records(conversation_id: str) -> list[dict[str, Any]]:
+    safe_id = Path(conversation_id).name
+    records = [
+        record
+        for record in _iter_session_records()
+        if record["conversation_id"] == safe_id
+    ]
+    if not records:
+        raise HTTPException(status_code=404, detail=f"Conversation not found: {safe_id}")
+    return sorted(records, key=lambda item: item["timestamp"])
 
 
 def _resolve_pdf_file(doc_name: str) -> Path:
@@ -235,19 +330,19 @@ def create_app() -> FastAPI:
 
     @app.get("/api/sessions")
     async def list_sessions() -> dict[str, Any]:
-        SESSION_LOG_DIR.mkdir(parents=True, exist_ok=True)
         items: list[dict[str, Any]] = []
-        for fp in sorted(SESSION_LOG_DIR.glob("*.json"), reverse=True):
-            payload = _load_session(fp)
+        for record in _iter_session_records():
+            payload = record["payload"]
             items.append(
                 {
-                    "id": fp.stem,
-                    "timestamp": payload.get("timestamp", fp.stem),
+                    "id": record["id"],
+                    "timestamp": record["timestamp"],
                     "doc_name": payload.get("doc_name", ""),
                     "query": payload.get("query", ""),
                     "title": payload.get("title", ""),
                     "total_turns": payload.get("total_turns", 0),
                     "pages_retrieved": payload.get("pages_retrieved", []),
+                    "context_session_id": payload.get("context_session_id"),
                 }
             )
         return {"sessions": items}
@@ -276,6 +371,43 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
         fp.unlink()
         return {"ok": True, "id": session_id}
+
+    @app.get("/api/conversations")
+    async def list_conversations() -> dict[str, Any]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for record in _iter_session_records():
+            grouped.setdefault(record["conversation_id"], []).append(record)
+
+        conversations = [
+            _build_conversation_summary(conversation_id, records)
+            for conversation_id, records in grouped.items()
+        ]
+        conversations.sort(key=lambda item: item["timestamp"], reverse=True)
+        return {"conversations": conversations}
+
+    @app.get("/api/conversations/{conversation_id}")
+    async def get_conversation(conversation_id: str) -> dict[str, Any]:
+        records = _get_conversation_records(conversation_id)
+        summary = _build_conversation_summary(records[0]["conversation_id"], records)
+        summary["entries"] = [_build_conversation_entry(record) for record in records]
+        return summary
+
+    @app.patch("/api/conversations/{conversation_id}/rename")
+    async def rename_conversation(conversation_id: str, req: RenameRequest) -> dict[str, Any]:
+        records = _get_conversation_records(conversation_id)
+        title = req.title.strip()
+        for record in records:
+            payload = record["payload"]
+            payload["title"] = title
+            record["path"].write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "id": Path(conversation_id).name, "title": title}
+
+    @app.delete("/api/conversations/{conversation_id}")
+    async def delete_conversation(conversation_id: str) -> dict[str, Any]:
+        records = _get_conversation_records(conversation_id)
+        for record in records:
+            record["path"].unlink()
+        return {"ok": True, "id": Path(conversation_id).name, "deleted": len(records)}
 
     @app.get("/api/docs")
     async def list_docs() -> dict[str, Any]:
@@ -376,11 +508,14 @@ def create_app() -> FastAPI:
             prompt_file=req.prompt_file or "qa_system.txt",
             max_turns=req.max_turns,
             history_messages=req.history,
+            enable_context_reuse=req.enable_context_reuse,
+            context_session_id=req.context_session_id,
         )
         logger.info("[web] qa done: doc=%s turns=%s", ready.doc_name, response.total_turns)
         return {
             "ok": True,
             "doc_name": ready.doc_name,
+            "context_session_id": response.context_session_id,
             "process": _process_result_to_dict(ready),
             "response": _rag_response_to_dict(response),
         }
@@ -457,10 +592,13 @@ def create_app() -> FastAPI:
                 max_turns=req.max_turns,
                 progress_callback=emit,
                 history_messages=req.history,
+                enable_context_reuse=req.enable_context_reuse,
+                context_session_id=req.context_session_id,
             )
             logger.info("[web] qa/stream done: doc=%s turns=%s", ready.doc_name, response.total_turns)
             return {
                 "doc_name": ready.doc_name,
+                "context_session_id": response.context_session_id,
                 "process": _process_result_to_dict(ready),
                 "response": _rag_response_to_dict(response),
             }

@@ -35,6 +35,7 @@ rag_response_st = st.builds(
     citations=st.lists(citation_st, max_size=5),
     trace=st.lists(tool_call_record_st, max_size=5),
     pages_retrieved=st.lists(st.integers(min_value=1, max_value=9999), max_size=10),
+    all_pages_requested=st.lists(st.integers(min_value=1, max_value=9999), max_size=20),
     total_turns=st.integers(min_value=0, max_value=100),
 )
 
@@ -45,12 +46,13 @@ rag_response_st = st.builds(
 @given(response=rag_response_st)
 @settings(max_examples=100)
 def test_rag_response_has_all_required_fields(response: RAGResponse):
-    """RAGResponse 包含 answer、answer_clean、citations、trace、pages_retrieved、total_turns 字段。"""
+    """RAGResponse 包含 answer、answer_clean、citations、trace、pages_retrieved、all_pages_requested、total_turns 字段。"""
     assert hasattr(response, "answer") and isinstance(response.answer, str)
     assert hasattr(response, "answer_clean") and isinstance(response.answer_clean, str)
     assert hasattr(response, "citations") and isinstance(response.citations, list)
     assert hasattr(response, "trace") and isinstance(response.trace, list)
     assert hasattr(response, "pages_retrieved") and isinstance(response.pages_retrieved, list)
+    assert hasattr(response, "all_pages_requested") and isinstance(response.all_pages_requested, list)
     assert hasattr(response, "total_turns") and isinstance(response.total_turns, int)
 
 

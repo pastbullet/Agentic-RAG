@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/agent/citation.py
+# hypothesis_version: 6.151.9
+
+[200, 500, '- \\*\\*', ';\\s', '\\.\\s', '\\n', '。', '；']

@@ -61,7 +61,9 @@ class RAGResponse(BaseModel):
     citations: list[Citation] = []
     trace: list[ToolCallRecord] = []
     pages_retrieved: list[int] = []
+    all_pages_requested: list[int] = []
     total_turns: int = 0
+    context_session_id: str | None = None
 
 
 # ── 评测模型 ──────────────────────────────────────────────
@@ -89,6 +91,8 @@ class EvalResult(BaseModel):
     citation_valid_rate: float
     total_turns: int
     pages_hit_rate: float
+    duplicate_read_rate: float = 0.0
+    avg_pages_per_turn: float = 0.0
     answer: str
 
 

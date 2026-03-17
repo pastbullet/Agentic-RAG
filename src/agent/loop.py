@@ -27,6 +27,7 @@ def _save_session(query: str, doc_name: str, messages: list[dict], response: "RA
         "query": query,
         "total_turns": response.total_turns,
         "pages_retrieved": response.pages_retrieved,
+        "all_pages_requested": response.all_pages_requested,
         "answer": response.answer,
         "answer_clean": response.answer_clean,
         "citations": [c.model_dump() for c in response.citations],
@@ -46,6 +47,11 @@ from src.tools.schemas import get_tool_schemas
 from src.agent.llm_adapter import LLMAdapter
 from src.agent.citation import extract_citations, validate_citations, clean_answer
 from src.context import ContextManager
+from src.context.reuse import (
+    ContextReuseBuilder,
+    PRECHECK_GUIDANCE,
+)
+from src.context.reuse.config import resolve_config
 
 load_dotenv()
 
@@ -278,6 +284,27 @@ def _extract_pages_from_result(result: dict) -> list[int]:
     return pages
 
 
+def _append_context_reuse_message(
+    messages: list[dict],
+    system_prompt: str,
+    context_text: str,
+) -> tuple[list[dict], str]:
+    if not context_text:
+        return messages, system_prompt
+
+    updated_prompt = system_prompt.rstrip() + PRECHECK_GUIDANCE
+    updated_messages = list(messages)
+    updated_messages[0] = {"role": "system", "content": updated_prompt}
+    updated_messages.insert(
+        1,
+        {
+            "role": "system",
+            "content": f"[Context from previous turns]\n{context_text}",
+        },
+    )
+    return updated_messages, updated_prompt
+
+
 async def agentic_rag(
     query: str,
     doc_name: str,
@@ -287,6 +314,10 @@ async def agentic_rag(
     system_prompt_override: str | None = None,
     progress_callback: ProgressCallback | None = None,
     history_messages: list[dict[str, str]] | None = None,
+    enable_context_reuse: bool | None = None,
+    context_session_id: str | None = None,
+    summary_char_budget: int | None = None,
+    enable_page_dedup: bool | None = None,
 ) -> RAGResponse:
     """核心 Agent 循环。
 
@@ -308,39 +339,23 @@ async def agentic_rag(
     Returns:
         RAGResponse 包含答案、trace、pages_retrieved 等
     """
+    enable_context_reuse_resolved = resolve_config(
+        enable_context_reuse,
+        "CONTEXT_REUSE_ENABLED",
+        True,
+    )
+    summary_char_budget_resolved = resolve_config(
+        summary_char_budget,
+        "CONTEXT_REUSE_CHAR_BUDGET",
+        4000,
+    )
+
     # 解析模型和 provider
     resolved_model = _resolve_model(model)
     provider = _detect_provider(resolved_model)
 
     # 初始化 LLM 适配器
     adapter = LLMAdapter(provider=provider, model=resolved_model)
-
-    # 加载 system prompt 和 tool schemas
-    override = (system_prompt_override or "").strip()
-    if override:
-        system_prompt = override
-    else:
-        system_prompt = load_system_prompt(prompt_file)
-    tools = get_tool_schemas()
-    normalized_history = _normalize_history_messages(history_messages)
-    query_for_llm = _augment_query_with_disambiguation(query)
-
-    # 组装初始消息列表 (Req 6.1)
-    messages: list[dict] = [{"role": "system", "content": system_prompt}]
-    messages.extend(normalized_history)
-    messages.append(
-        {
-            "role": "user",
-            "content": (
-                f"Target document: {doc_name}\n"
-                f"User question: {query_for_llm}"
-            ),
-        }
-    )
-
-    trace: list[ToolCallRecord] = []
-    pages_retrieved: list[int] = []
-    turn = 0
 
     def emit(payload: dict[str, Any]) -> None:
         if progress_callback is None:
@@ -354,13 +369,74 @@ async def agentic_rag(
     ctx: ContextManager | None = None
     ctx_session_id: str | None = None
     ctx_turn_id: str | None = None
+    session_dir: Path | None = None
     try:
         ctx = ContextManager()
-        ctx_session_id = ctx.create_session(doc_name)
+        if context_session_id:
+            try:
+                ctx_session_id = ctx.load_session(context_session_id)
+            except Exception:
+                logger.warning("Failed to load context session %s; creating a new one", context_session_id)
+                ctx_session_id = ctx.create_session(doc_name)
+        else:
+            ctx_session_id = ctx.create_session(doc_name)
+        session_dir = ctx.session_dir
         ctx_turn_id = ctx.create_turn(query, doc_name)
     except Exception:
         logger.exception("Context manager initialization failed")
         ctx = None
+        ctx_session_id = None
+        ctx_turn_id = None
+        session_dir = None
+
+    # 加载 system prompt 和 tool schemas
+    override = (system_prompt_override or "").strip()
+    if override:
+        system_prompt = override
+    else:
+        system_prompt = load_system_prompt(prompt_file)
+    tools = get_tool_schemas()
+    normalized_history = _normalize_history_messages(history_messages)
+    query_for_llm = _augment_query_with_disambiguation(query)
+
+    base_messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    base_messages.extend(normalized_history)
+    base_messages.append(
+        {
+            "role": "user",
+            "content": (
+                f"Target document: {doc_name}\n"
+                f"User question: {query_for_llm}"
+            ),
+        }
+    )
+
+    messages = base_messages
+    if enable_context_reuse_resolved and session_dir is not None:
+        try:
+            builder = ContextReuseBuilder(session_dir, summary_char_budget_resolved)
+            context_text = builder.build_summary(doc_name, query=query)
+            if context_text:
+                messages, system_prompt = _append_context_reuse_message(
+                    base_messages,
+                    system_prompt,
+                    context_text,
+                )
+        except Exception as exc:
+            logger.exception("Context reuse build failed")
+            emit(
+                {
+                    "type": "context_reuse_error",
+                    "stage": "build_summary",
+                    "message": str(exc),
+                    "doc_name": doc_name,
+                }
+            )
+
+    trace: list[ToolCallRecord] = []
+    pages_retrieved: list[int] = []
+    all_pages_requested: list[int] = []
+    turn = 0
 
     # Agent 循环
     while turn < max_turns:
@@ -406,13 +482,28 @@ async def agentic_rag(
 
             # 支持并行 tool call (Req 5.7)
             for tc in response.tool_calls:
-                result = execute_tool(tc.name, tc.arguments)
+                try:
+                    result = execute_tool(tc.name, tc.arguments)
+                except Exception as exc:
+                    emit(
+                        {
+                            "type": "error",
+                            "stage": "tool_execution",
+                            "message": str(exc),
+                            "doc_name": doc_name,
+                            "turn": turn,
+                        }
+                    )
+                    logger.exception("Tool execution failed")
+                    result = {"error": str(exc)}
                 stream_result = _truncate_result_for_stream(result)
                 result_summary = _make_result_summary(result)
 
                 # 追踪检索的页码
                 if tc.name == "get_page_content":
-                    pages_retrieved.extend(_extract_pages_from_result(result))
+                    requested_pages = _extract_pages_from_result(result)
+                    pages_retrieved.extend(requested_pages)
+                    all_pages_requested.extend(requested_pages)
 
                 # 记录 ToolCallRecord (Req 6.4)
                 trace.append(
@@ -465,7 +556,9 @@ async def agentic_rag(
                 citations=citations,
                 trace=trace,
                 pages_retrieved=unique_pages,
+                all_pages_requested=all_pages_requested,
                 total_turns=turn,
+                context_session_id=ctx_session_id,
             )
             emit(
                 {
@@ -477,6 +570,7 @@ async def agentic_rag(
                     "trace": [t.model_dump() for t in rag_response.trace],
                     "pages_retrieved": rag_response.pages_retrieved,
                     "total_turns": rag_response.total_turns,
+                    "context_session_id": rag_response.context_session_id,
                 }
             )
             # Context sidecar: finalize
@@ -507,7 +601,9 @@ async def agentic_rag(
         citations=citations,
         trace=trace,
         pages_retrieved=unique_pages,
+        all_pages_requested=all_pages_requested,
         total_turns=turn,
+        context_session_id=ctx_session_id,
     )
     emit(
         {
@@ -519,6 +615,7 @@ async def agentic_rag(
             "trace": [t.model_dump() for t in rag_response.trace],
             "pages_retrieved": rag_response.pages_retrieved,
             "total_turns": rag_response.total_turns,
+            "context_session_id": rag_response.context_session_id,
         }
     )
     # Context sidecar: finalize

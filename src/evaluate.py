@@ -18,6 +18,20 @@ from src.agent.loop import agentic_rag
 logger = logging.getLogger(__name__)
 
 
+def _compute_duplicate_read_rate(all_requested: list[int]) -> float:
+    """Return duplicate page read rate for a request stream."""
+    if not all_requested:
+        return 0.0
+    return 1.0 - len(set(all_requested)) / len(all_requested)
+
+
+def _compute_avg_pages_per_turn(all_requested: list[int], total_turns: int) -> float:
+    """Return the average unique pages retrieved per turn."""
+    if total_turns <= 0:
+        return 0.0
+    return len(set(all_requested)) / total_turns
+
+
 def load_test_cases(path: str) -> list[TestCase]:
     """从 JSON 文件加载 TestCase 列表。
 
@@ -77,6 +91,13 @@ async def evaluate_single(test_case: TestCase, model: str | None) -> EvalResult:
     else:
         pages_hit_rate = 1.0  # 无预期页码时视为 100%
 
+    all_requested = response.all_pages_requested
+    duplicate_read_rate = _compute_duplicate_read_rate(all_requested)
+    avg_pages_per_turn = _compute_avg_pages_per_turn(
+        all_requested,
+        response.total_turns,
+    )
+
     return EvalResult(
         id=test_case.id,
         query=test_case.query,
@@ -86,6 +107,8 @@ async def evaluate_single(test_case: TestCase, model: str | None) -> EvalResult:
         citation_valid_rate=citation_valid_rate,
         total_turns=response.total_turns,
         pages_hit_rate=pages_hit_rate,
+        duplicate_read_rate=duplicate_read_rate,
+        avg_pages_per_turn=avg_pages_per_turn,
         answer=response.answer,
     )
 
@@ -122,6 +145,8 @@ async def evaluate_all(test_set_path: str, model: str | None = None) -> list[Eva
         print(f"  citation_valid_rate: {result.citation_valid_rate:.1%}")
         print(f"  total_turns: {result.total_turns}")
         print(f"  pages_hit_rate: {result.pages_hit_rate:.1%}")
+        print(f"  duplicate_read_rate: {result.duplicate_read_rate:.1%}")
+        print(f"  avg_pages_per_turn: {result.avg_pages_per_turn:.2f}")
         print(f"  citations: {result.citation_count}")
         print()
 
@@ -139,6 +164,8 @@ async def evaluate_all(test_set_path: str, model: str | None = None) -> list[Eva
     avg_citation_valid = sum(r.citation_valid_rate for r in results) / n * 100
     avg_turns = sum(r.total_turns for r in results) / n
     avg_pages_hit = sum(r.pages_hit_rate for r in results) / n * 100
+    avg_dup_rate = sum(r.duplicate_read_rate for r in results) / n * 100
+    avg_pages_per_turn = sum(r.avg_pages_per_turn for r in results) / n
 
     # 输出汇总
     print(f"{'='*60}")
@@ -148,6 +175,8 @@ async def evaluate_all(test_set_path: str, model: str | None = None) -> list[Eva
     print(f"  引用有效率:         {avg_citation_valid:.1f}%  (目标 > 90%)")
     print(f"  平均轮次:           {avg_turns:.1f}    (目标 4-8)")
     print(f"  页码命中率:         {avg_pages_hit:.1f}%  (目标 > 70%)")
+    print(f"  平均重复读取率:     {avg_dup_rate:.1f}%  (目标 < 10%)")
+    print(f"  平均每轮页数:       {avg_pages_per_turn:.2f}   (目标 2-5)")
     print(f"  用例总数:           {n}")
     print(f"{'='*60}\n")
 
