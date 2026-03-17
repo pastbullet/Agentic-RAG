@@ -1505,22 +1505,36 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None):
+    if not isinstance(node, dict):
+        return node
+
+    # Front matter / TOC anchors are already positioned and should not be
+    # refined from their page text, otherwise TOC entries get re-attached as
+    # fake body children.
+    if node.get("retrieval_disabled") or node.get("toc_span"):
+        return node
+
+    # 使用 _build_end_index（真实内容覆盖范围）做扫描，而非 end_index（展示边界）。
+    # 这样父节点（如 Section 6）能扫描到所有子节点的页面。
+    build_end = node.get('_build_end_index') or node.get('end_index')
+    scan_start = node['start_index']
+
     # 1. 计算 Token，判断是否需要细分
-    node_page_list = page_list[node['start_index']-1:node['end_index']]
+    node_page_list = page_list[scan_start - 1:build_end]
     token_num = sum([page[1] for page in node_page_list])
 
-    page_span = max(0, node['end_index'] - node['start_index'] + 1)
+    page_span = max(0, build_end - scan_start + 1)
     node_structure = str(node.get("structure") or "").strip()
     node_depth = node_structure.count(".") + 1 if node_structure else 1
     is_large_node = (
-        node['end_index'] - node['start_index'] > opt.max_page_num_each_node
+        build_end - scan_start > opt.max_page_num_each_node
         or token_num >= opt.max_token_num_each_node
     )
     should_probe = (node_depth < 5) or is_large_node
 
     if should_probe and node_page_list:
         if is_large_node and logger:
-            logger.info(f"Refining large node (Adaptive): {node['title']} ({node['start_index']}-{node['end_index']})")
+            logger.info(f"Refining large node (Adaptive): {node['title']} ({scan_start}-{build_end})")
 
         # --- 步骤 A: 轻量 heading 规则抽取 ---
         parent_structure = node.get("structure")
@@ -1536,7 +1550,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
 
         raw_sub_toc = extract_sub_toc_by_headings(
             node_page_list=node_page_list,
-            start_index=node['start_index'],
+            start_index=scan_start,
             parent_structure=parent_structure,
             max_lines_per_page=scan_lines,
         )
@@ -1555,9 +1569,9 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
                 logger.info(
                     f"Heading extract fallback to process_no_toc: "
                     f"count={len(raw_sub_toc)}, unique_pages={unique_pages}, "
-                    f"range=({node['start_index']}-{node['end_index']})"
+                    f"range=({scan_start}-{build_end})"
                 )
-            raw_sub_toc = process_no_toc(node_page_list, start_index=node['start_index'], model=opt.model, logger=logger)
+            raw_sub_toc = process_no_toc(node_page_list, start_index=scan_start, model=opt.model, logger=logger)
 
         if not raw_sub_toc:
             return node
@@ -1602,16 +1616,21 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
             return node
 
         # --- 步骤 D: 后处理与挂载 ---
-        if node['title'].strip() == checked_sub_toc[0]['title'].strip():
+        # 如果节点已有子节点（由 list_to_tree 挂载），保留已有子节点，不覆盖。
+        existing_children = node.get("nodes") or []
+        if existing_children:
+            # 已有子节点，跳过覆盖，直接递归下一层
+            pass
+        elif node['title'].strip() == checked_sub_toc[0]['title'].strip():
             if len(checked_sub_toc) > 1:
-                node['nodes'] = post_processing(checked_sub_toc[1:], node['end_index'])
+                node['nodes'] = post_processing(checked_sub_toc[1:], build_end)
                 node['end_index'] = checked_sub_toc[1]['start_index']
             else:
                 node['nodes'] = []
         else:
-            node['nodes'] = post_processing(checked_sub_toc, node['end_index'])
+            node['nodes'] = post_processing(checked_sub_toc, build_end)
             node['end_index'] = checked_sub_toc[0]['start_index'] if checked_sub_toc else node['end_index']
-        
+
     # --- 递归下一层 ---
     if 'nodes' in node and node['nodes']:
         tasks = [
@@ -1619,7 +1638,7 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None)
             for child_node in node['nodes']
         ]
         await asyncio.gather(*tasks)
-    
+
     return node
 
 async def check_title_appearance_fast(item, page_list, start_index=1):
@@ -1668,6 +1687,15 @@ async def check_title_appearance_fast(item, page_list, start_index=1):
         return {'answer': 'yes'}
     
     return {'answer': 'no', 'reason': 'fuzzy_low'}
+
+def _strip_build_fields(nodes):
+    """清理构建阶段的内部字段 (_build_end_index)，不输出到最终 JSON。"""
+    if not isinstance(nodes, list):
+        return
+    for node in nodes:
+        node.pop("_build_end_index", None)
+        if isinstance(node.get("nodes"), list):
+            _strip_build_fields(node["nodes"])
 
 async def tree_parser(page_list, opt, doc=None, logger=None):
     bookmark_toc = get_pdf_bookmarks_toc(doc)
@@ -1772,6 +1800,9 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
 
     # 输出顺序稳定：roots + children 按 (start_index, start_line, node_id/title) 排序。
     sort_nodes_by_position(toc_tree)
+
+    # 清理构建阶段的内部字段，不输出到最终 JSON
+    _strip_build_fields(toc_tree)
     
     return toc_tree
 

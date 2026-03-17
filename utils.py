@@ -635,6 +635,9 @@ def list_to_tree(data):
             "nodes": [],
             "_node_key": node_key,  # 内部字段，清理阶段会删除
         }
+        # 构建阶段用的真实内容覆盖范围（递归细化扫描用）
+        if item.get("_build_end_index") is not None:
+            node["_build_end_index"] = item["_build_end_index"]
         # Front Matter 页内锚点（向后兼容：老数据不存在这些字段）。
         if item.get("start_line") is not None:
             node["start_line"] = item.get("start_line")
@@ -950,7 +953,7 @@ def post_processing(structure, end_physical_index):
             next_start_index = structure[i + 1].get('physical_index')
             if isinstance(next_start_index, int):
                 # 回退为旧版边界策略：
-                # 若下一标题明确“从页首开始”，当前节到上一页截止；否则允许同页衔接。
+                # 若下一标题明确"从页首开始"，当前节到上一页截止；否则允许同页衔接。
                 if structure[i + 1].get('appear_start') == 'yes':
                     item['end_index'] = max(start_index or 1, next_start_index - 1)
                 else:
@@ -963,17 +966,50 @@ def post_processing(structure, end_physical_index):
             else:
                 item['end_index'] = end_physical_index
 
+    # ---- _build_end_index: 真实内容覆盖范围 ----
+    # end_index 是"展示边界"（到下一个扁平邻居为止），用于最终输出。
+    # _build_end_index 是"构建边界"（到下一个同级或更高级节点为止），
+    # 用于递归细化时的扫描范围，确保父节点能扫描到所有子节点的页面。
+    for i, item in enumerate(structure):
+        item_structure = item.get("structure")
+        if not item_structure:
+            # 无编号节点不需要构建边界
+            continue
+        item_depth = item_structure.count(".")
+
+        # 向后找同级或更高级的下一个节点
+        build_end = end_physical_index
+        for j in range(i + 1, len(structure)):
+            sibling = structure[j]
+            sib_structure = sibling.get("structure")
+            if sib_structure is None:
+                # 无编号节点（Appendix 等）视为顶级，截止
+                sib_start = sibling.get("physical_index")
+                if isinstance(sib_start, int):
+                    build_end = max(item.get("start_index") or 1, sib_start - 1)
+                break
+            sib_depth = sib_structure.count(".")
+            if sib_depth <= item_depth:
+                # 同级或更高级节点，截止
+                sib_start = sibling.get("physical_index")
+                if isinstance(sib_start, int):
+                    build_end = max(item.get("start_index") or 1, sib_start - 1)
+                break
+
+        item['_build_end_index'] = build_end
+
     tree = list_to_tree(structure)
 
     if tree:
         # 回退到旧行为：父节点页码不再强制聚合子节点范围。
-        # 保留扁平 TOC 推导出的 start/end，便于观察“父节点页码接续”原始结果。
+        # 保留扁平 TOC 推导出的 start/end，便于观察"父节点页码接续"原始结果。
         return tree
 
     # fallback: 如果 tree 构建失败，返回扁平结构并清理临时字段。
     for node in structure:
         node.pop('appear_start', None)
         node.pop('physical_index', None)
+        node.pop('_build_end_index', None)
     return structure
 
 def clean_structure_post(data):
