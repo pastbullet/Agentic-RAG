@@ -166,12 +166,16 @@ def write_chunk_jsons(
     return chunk_files
 
 
-def build_content_db(pdf_path: str, output_dir: str = "output", chunk_size: int = 20) -> List[Path]:
+def build_content_db(
+    pdf_path: str,
+    output_dir: str = "data/out/content/document",
+    chunk_size: int = 20,
+) -> List[Path]:
     """
     主流程：
-    1) 提取图片到 output/images
+    1) 提取图片到 <output_dir>/images
     2) 提取每页文本和表格
-    3) 按20页切分写入 output/json
+    3) 按20页切分写入 <output_dir>/json
     """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be > 0")
@@ -184,7 +188,7 @@ def build_content_db(pdf_path: str, output_dir: str = "output", chunk_size: int 
     json_dir = output_root / "json"
     images_dir = output_root / "images"
 
-    # 图片相对路径基准目录：与 output 同级（确保路径形如 output/images/xxx）
+    # 图片相对路径基准目录：与 output_dir 同级
     rel_base_dir = output_root.parent
 
     page_to_images = extract_images_by_page(
@@ -219,7 +223,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output-dir",
-        default="output",
+        default="data/out/content/FC-LS",
         help="Output root dir containing json/ and images/.",
     )
     parser.add_argument(

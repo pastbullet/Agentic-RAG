@@ -9,6 +9,13 @@ import json
 from pathlib import Path
 from typing import TypedDict
 
+from .pathing import (
+    RUNTIME_REGISTRY_PATH,
+    chunk_dir_for_doc,
+    content_dir_for_doc,
+    page_index_path_for_doc,
+)
+
 
 class DocConfig(TypedDict, total=False):
     """Configuration for a registered document."""
@@ -22,20 +29,38 @@ class DocConfig(TypedDict, total=False):
 # Built-in registry entries (kept for backward compatibility)
 DOC_REGISTRY: dict[str, DocConfig] = {
     "FC-LS.pdf": {
-        "chunks_dir": "data/out/chunks_3/FC-LS",
-        "content_dir": "output/json",
+        "chunks_dir": str(chunk_dir_for_doc("FC-LS")),
+        "content_dir": str(content_dir_for_doc("FC-LS")),
         "total_pages": 210,
     },
     "rfc5880-BFD.pdf": {
-        "chunks_dir": "data/out/chunks_3/BFD",
-        "content_dir": "output_bfd/json",
+        "chunks_dir": str(chunk_dir_for_doc("rfc5880-BFD")),
+        "content_dir": str(content_dir_for_doc("rfc5880-BFD")),
         "total_pages": 49,
     },
 }
-
-
-RUNTIME_REGISTRY_PATH = Path("data/out/doc_registry.runtime.json")
 _REQUIRED_KEYS = ("chunks_dir", "content_dir", "total_pages")
+
+
+def _canonicalize_chunks_dir(path_str: str) -> str:
+    path = Path(path_str)
+    parts = path.parts
+    if len(parts) >= 3 and parts[:2] == ("data", "out") and parts[2].startswith("chunks"):
+        if len(parts) >= 4:
+            return str(chunk_dir_for_doc(parts[3]))
+    return str(path)
+
+
+def _canonicalize_content_dir(path_str: str) -> str:
+    path = Path(path_str)
+    parts = path.parts
+    if len(parts) >= 3 and parts[:2] == ("output", "docs"):
+        return str(content_dir_for_doc(parts[2]))
+    if len(parts) >= 2 and parts[:2] == ("output", "json"):
+        return str(content_dir_for_doc("FC-LS"))
+    if len(parts) >= 2 and parts[:2] == ("output_bfd", "json"):
+        return str(content_dir_for_doc("rfc5880-BFD"))
+    return str(path)
 
 
 def _normalize_entry(raw: dict) -> DocConfig | None:
@@ -55,6 +80,9 @@ def _normalize_entry(raw: dict) -> DocConfig | None:
         return None
     if not isinstance(content_dir, str) or not content_dir:
         return None
+
+    chunks_dir = _canonicalize_chunks_dir(chunks_dir)
+    content_dir = _canonicalize_content_dir(content_dir)
 
     try:
         total_pages_int = int(total_pages)
@@ -124,8 +152,8 @@ def register_document(
 ) -> DocConfig:
     """Register a document for QA and optionally persist to runtime registry."""
     entry: DocConfig = {
-        "chunks_dir": str(chunks_dir),
-        "content_dir": str(content_dir),
+        "chunks_dir": _canonicalize_chunks_dir(str(chunks_dir)),
+        "content_dir": _canonicalize_content_dir(str(content_dir)),
         "total_pages": int(total_pages),
     }
     if pdf_path:
@@ -171,6 +199,12 @@ def is_document_processed(doc_name: str) -> bool:
     manifest = chunks_dir / "manifest.json"
     if not manifest.exists():
         return False
+
+    page_index_path = page_index_path_for_doc(doc_name, chunks_dir)
+    if not page_index_path.exists():
+        legacy_page_index_path = Path("data/out") / f"{Path(doc_name).stem}_page_index.json"
+        if not legacy_page_index_path.exists():
+            return False
 
     part_files = list(chunks_dir.glob("part_*.json"))
     if not part_files:

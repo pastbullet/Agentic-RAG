@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/extractors/base.py
+# hypothesis_version: 6.151.9
+
+['```', 'content', 'json', 'role', 'system', 'user', '{', '}']

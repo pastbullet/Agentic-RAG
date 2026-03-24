@@ -16,7 +16,7 @@
 - **可观测性**：
   - CLI `--verbose` 输出 tool trace
   - Web 流式事件输出 turn、tool 调用、最终答案
-  - 会话日志写入 `logs/sessions/*.json`
+  - 会话日志写入 `data/sessions/*.json`
 - **上下文 Sidecar**：会话/轮次/文档/证据/主题状态写入 `data/sessions/`
 
 ---
@@ -53,8 +53,8 @@
 │   ├── raw/                     # 原始 PDF
 │   ├── out/                     # 索引与分块产物、运行时注册表
 │   └── sessions/                # 上下文会话状态
-├── output/docs/                 # 内容库（分页 JSON）
-├── logs/sessions/               # QA 会话日志（消息/trace/答案）
+├── data/out/content/            # 内容库（分页 JSON，按文档分目录）
+├── data/sessions/               # QA 会话日志（消息/trace/答案）
 └── tests/                       # 单元 + 集成测试
 ```
 
@@ -212,7 +212,7 @@ python -m src.evaluate --test-set data/eval/goldset_pr9.json --model gpt-4o
 请先处理文档，或确认文档名与注册表一致（例如 `xxx.pdf`）。
 
 ### Q2: 回答中没有引用
-请检查 prompt、模型输出与工具调用是否正常；日志可在 `logs/sessions/` 中排查。
+请检查 prompt、模型输出与工具调用是否正常；日志可在 `data/sessions/` 中排查。
 
 ### Q3: 工具结果太大导致前端卡顿
 已在后端流式事件中对 tool 结果做裁剪；完整结果仍保留在会话日志/trace 中。

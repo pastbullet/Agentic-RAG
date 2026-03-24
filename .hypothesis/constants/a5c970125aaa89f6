@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/ingest/pipeline.py
+# hypothesis_version: 6.151.9
+
+[30000, '*.pdf', '-', '.pdf', 'Empty document input', '_', 'built', 'chunk', 'chunks_dir', 'content', 'content_*.json', 'content_dir', 'data', 'doc_name', 'document', 'end_page', 'error', 'if_add_node_id', 'if_add_node_summary', 'if_add_node_text', 'index', 'ingest', 'json', 'manifest.json', 'message', 'model', 'part_*.json', 'pdf_path', 'raw', 'register', 'skipped', 'stage', 'stage_done', 'stage_start', 'structure', 'toc_check_page_num', 'total_pages', 'type', 'utf-8']

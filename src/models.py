@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 # ── 核心模型 ──────────────────────────────────────────────
@@ -134,11 +136,74 @@ class ProtocolMessage(BaseModel):
     source_pages: list[int] = []
 
 
+class ProcedureStep(BaseModel):
+    step_number: int
+    condition: str = ""
+    action: str
+
+
+class ProcedureRule(BaseModel):
+    name: str
+    steps: list[ProcedureStep] = []
+    source_pages: list[int] = []
+
+
+class TimerConfig(BaseModel):
+    timer_name: str
+    timeout_value: str = ""
+    trigger_action: str = ""
+    description: str = ""
+    source_pages: list[int] = []
+
+
+class ErrorRule(BaseModel):
+    error_condition: str
+    handling_action: str
+    description: str = ""
+    source_pages: list[int] = []
+
+
 class ProtocolSchema(BaseModel):
     """协议的结构化表示 — 代码生成的输入。"""
 
     protocol_name: str
     state_machines: list[ProtocolStateMachine] = []
     messages: list[ProtocolMessage] = []
+    procedures: list[ProcedureRule] = []
+    timers: list[TimerConfig] = []
+    errors: list[ErrorRule] = []
     constants: dict = {}
     source_document: str = ""
+
+
+# ── 节点语义分类模型 ──────────────────────────────────────
+
+
+NodeLabelType = Literal[
+    "state_machine",       # 包含状态集合、状态转移、触发事件
+    "message_format",      # 描述报文/帧/TLV/字段布局
+    "procedure_rule",      # 描述处理流程/顺序步骤，但无完整状态结构
+    "timer_rule",          # 描述超时/周期发送/保活/重传等时序机制
+    "error_handling",      # 描述异常条件/非法值/丢弃/错误恢复
+    "general_description", # 背景介绍/术语/设计动机/非规范性建议
+]
+
+
+class NodeSemanticLabel(BaseModel):
+    """单个文档树叶节点的语义分类结果。"""
+
+    node_id: str
+    label: NodeLabelType
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    rationale: str = ""
+    secondary_hints: list[str] = Field(default_factory=list)
+
+
+class NodeLabelMeta(BaseModel):
+    """分类运行记录 — 用于判断缓存是否失效。"""
+
+    source_document: str
+    model_name: str
+    prompt_version: str
+    label_priority: list[str]
+    created_at: str

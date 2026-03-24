@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.tools.registry import get_doc_config, is_document_processed, register_document
+from src.tools.pathing import chunk_dir_for_doc, content_root_for_doc, page_index_path_for_doc
 
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[dict[str, Any]], None]
@@ -173,7 +174,7 @@ def _result_from_existing(doc_name: str, pdf_path: str | None = None) -> Process
     chunks_dir = Path(str(config["chunks_dir"]))
     content_dir = Path(str(config["content_dir"]))
     doc_stem = _safe_doc_stem(Path(doc_name).stem)
-    page_index_json = Path("data/out") / f"{doc_stem}_page_index.json"
+    page_index_json = page_index_path_for_doc(doc_stem, chunks_dir)
 
     resolved_pdf = pdf_path or str(config.get("pdf_path", ""))
     if not resolved_pdf:
@@ -240,9 +241,9 @@ def process_document(
         project_root = Path.cwd().resolve()
         doc_stem = _safe_doc_stem(source_pdf.stem)
 
-        page_index_json = project_root / "data" / "out" / f"{doc_stem}_page_index.json"
-        chunks_dir = project_root / "data" / "out" / "chunks_3" / doc_stem
-        content_root = project_root / "output" / "docs" / doc_stem
+        chunks_dir = (project_root / chunk_dir_for_doc(doc_stem)).resolve()
+        page_index_json = (project_root / page_index_path_for_doc(doc_stem)).resolve()
+        content_root = (project_root / content_root_for_doc(doc_stem)).resolve()
         content_dir = content_root / "json"
 
         index_built = False

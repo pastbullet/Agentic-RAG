@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/merge.py
+# hypothesis_version: 6.151.9
+
+['[^a-z0-9]+', '\\brfc\\s*\\d+\\b', '\\s+', 'dropped_empty_counts', 'field_count_after', 'field_count_before', 'merged_from', 'merged_groups', 'message', 'normalized_key', 'post_filter_counts', 'post_merge_counts', 'pre_merge_counts', 'source_pages_union', 'timer']

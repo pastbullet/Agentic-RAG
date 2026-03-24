@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-SESSION_LOG_DIR = PROJECT_ROOT / "logs" / "sessions"
+SESSION_LOG_DIR = PROJECT_ROOT / "data" / "sessions"
 UPLOAD_DIR = PROJECT_ROOT / "data" / "uploads"
 
 ProgressEmitter = Callable[[dict[str, Any]], None]

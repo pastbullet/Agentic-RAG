@@ -109,8 +109,8 @@ def test_process_document_first_time_builds_and_registers(tmp_path: Path, monkey
 
     cfg = get_doc_config("new_doc.pdf")
     assert "error" not in cfg
-    assert cfg["chunks_dir"] == "data/out/chunks_3/new_doc"
-    assert cfg["content_dir"] == "output/docs/new_doc/json"
+    assert cfg["chunks_dir"] == "data/out/chunk/new_doc"
+    assert cfg["content_dir"] == "data/out/content/new_doc/json"
     assert cfg["total_pages"] == 5
 
     assert is_document_processed("new_doc.pdf") is True

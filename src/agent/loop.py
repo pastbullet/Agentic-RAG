@@ -13,11 +13,11 @@ from typing import Any, Callable
 from dotenv import load_dotenv
 
 # ── Session log 目录 ─────────────────────────────────────
-SESSION_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs" / "sessions"
+SESSION_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "sessions"
 
 
 def _save_session(query: str, doc_name: str, messages: list[dict], response: "RAGResponse", context_session_id: str | None = None) -> Path:
-    """将完整的 messages 历史和最终答案保存到 logs/sessions/<timestamp>.json。"""
+    """将完整的 messages 历史和最终答案保存到 data/sessions/<timestamp>.json。"""
     SESSION_LOG_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = SESSION_LOG_DIR / f"{ts}.json"

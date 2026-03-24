@@ -339,7 +339,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--input",
-        default="data/out/FC-LS_5_page_index.json",
+        default="data/out/chunk/FC-LS/page_index.json",
         help="Input page_index json path.",
     )
     parser.add_argument(
@@ -350,7 +350,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output-root",
-        default="data/out/chunks",
+        default="data/out/chunk",
         help="Root output folder.",
     )
     parser.add_argument(

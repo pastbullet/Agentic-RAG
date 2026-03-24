@@ -33,7 +33,7 @@ def _parse_sse(raw: str) -> list[dict]:
 
 
 def _write_session_log(base_dir: Path, session_id: str, payload: dict) -> Path:
-    path = base_dir / "logs" / "sessions" / f"{session_id}.json"
+    path = base_dir / "data" / "sessions" / f"{session_id}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return path
 
@@ -41,9 +41,9 @@ def _write_session_log(base_dir: Path, session_id: str, payload: dict) -> Path:
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(web_app, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(web_app, "SESSION_LOG_DIR", tmp_path / "logs" / "sessions")
-    monkeypatch.setattr(web_app, "UPLOAD_DIR", tmp_path / "uploads")
-    (tmp_path / "logs" / "sessions").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(web_app, "SESSION_LOG_DIR", tmp_path / "data" / "sessions")
+    monkeypatch.setattr(web_app, "UPLOAD_DIR", tmp_path / "data" / "uploads")
+    (tmp_path / "data" / "sessions").mkdir(parents=True, exist_ok=True)
     return TestClient(web_app.app)
 
 
@@ -174,7 +174,7 @@ def test_conversation_rename_updates_all_grouped_logs(client: TestClient, tmp_pa
     assert resp.status_code == 200
 
     for session_id in ("20260308_120000", "20260308_120100"):
-        payload = json.loads((tmp_path / "logs" / "sessions" / f"{session_id}.json").read_text("utf-8"))
+        payload = json.loads((tmp_path / "data" / "sessions" / f"{session_id}.json").read_text("utf-8"))
         assert payload["title"] == "Renamed"
 
 
@@ -205,7 +205,7 @@ def test_conversation_delete_removes_grouped_logs(client: TestClient, tmp_path: 
     resp = client.delete("/api/conversations/sess_delete")
     assert resp.status_code == 200
     assert resp.json()["deleted"] == 2
-    assert list((tmp_path / "logs" / "sessions").glob("*.json")) == []
+    assert list((tmp_path / "data" / "sessions").glob("*.json")) == []
 
 
 def test_old_session_without_context_session_id_still_forms_own_conversation(client: TestClient, tmp_path: Path):
@@ -237,9 +237,9 @@ def test_process_path_sync(client: TestClient, monkeypatch):
             doc_name="new.pdf",
             doc_stem="new",
             pdf_path=pdf_path,
-            page_index_json="data/out/new_page_index.json",
-            chunks_dir="data/out/chunks_3/new",
-            content_dir="output/docs/new/json",
+            page_index_json="data/out/chunk/new/page_index.json",
+            chunks_dir="data/out/chunk/new",
+            content_dir="data/out/content/new/json",
             total_pages=3,
             index_built=True,
             structure_built=True,
@@ -270,9 +270,9 @@ def test_process_path_stream_event_order(client: TestClient, monkeypatch):
             doc_name="new.pdf",
             doc_stem="new",
             pdf_path=pdf_path,
-            page_index_json="data/out/new_page_index.json",
-            chunks_dir="data/out/chunks_3/new",
-            content_dir="output/docs/new/json",
+            page_index_json="data/out/chunk/new/page_index.json",
+            chunks_dir="data/out/chunk/new",
+            content_dir="data/out/content/new/json",
             total_pages=3,
             index_built=True,
             structure_built=True,
@@ -309,9 +309,9 @@ def test_qa_stream_emits_turn_and_final(client: TestClient, monkeypatch):
             doc_name=doc or "FC-LS.pdf",
             doc_stem="FC-LS",
             pdf_path="/tmp/FC-LS.pdf",
-            page_index_json="data/out/FC-LS_page_index.json",
-            chunks_dir="data/out/chunks_3/FC-LS",
-            content_dir="output/docs/FC-LS/json",
+            page_index_json="data/out/chunk/FC-LS/page_index.json",
+            chunks_dir="data/out/chunk/FC-LS",
+            content_dir="data/out/content/FC-LS/json",
             total_pages=210,
             index_built=False,
             structure_built=False,
