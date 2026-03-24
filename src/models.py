@@ -209,6 +209,29 @@ class SectionIR(BaseModel):
     source_pages: list[int] = []
 
 
+class CompositeDispatchCaseIR(BaseModel):
+    case_id: str
+    selector_values: list[int] = []
+    message_ir_id: str
+    description: str | None = None
+
+
+class CompositeTailIR(BaseModel):
+    slot_id: str
+    section_id: str
+    name: str
+    optional: bool = False
+    presence_rule_id: str | None = None
+    selector_field: str | None = None
+    total_length_field: str | None = None
+    fixed_prefix_bits: int | None = None
+    start_bit_offset: int | None = None
+    min_span_bits: int | None = None
+    max_span_bits: int | None = None
+    candidate_message_irs: list[str] = []
+    dispatch_cases: list[CompositeDispatchCaseIR] = []
+
+
 class FieldIR(BaseModel):
     field_id: str
     name: str
@@ -252,6 +275,7 @@ class MessageIR(BaseModel):
     min_size_bits: int | None = None
     max_size_bits: int | None = None
     sections: list[SectionIR] = []
+    composite_tails: list[CompositeTailIR] = []
     fields: list[FieldIR] = []
     normalized_field_order: list[str] = []
     presence_rules: list[PresenceRule] = []

@@ -9,9 +9,14 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-from src.extract.message_ir import lower_protocol_messages_to_message_ir, ready_message_irs
+from src.extract.message_ir import (
+    PackedContainerLayout,
+    build_packed_containers,
+    lower_protocol_messages_to_message_ir,
+    ready_message_irs,
+)
 from src.extract.rule_dsl import render_rule_expression_as_c
-from src.models import FieldIR, MessageIR, NormalizationStatus, ProtocolField, ProtocolMessage, ProtocolSchema, ProtocolStateMachine
+from src.models import CompositeTailIR, FieldIR, MessageIR, NormalizationStatus, ProtocolField, ProtocolMessage, ProtocolSchema, ProtocolStateMachine
 
 
 GENERATOR_NAME = "protocol-twin-codegen"
@@ -322,6 +327,14 @@ def _message_display_name(message: ProtocolMessage | MessageIR) -> str:
     return standardize_msg_name(raw_name)
 
 
+def _message_component_name(message: ProtocolMessage | MessageIR) -> str:
+    return _to_lower_snake(_message_display_name(message))
+
+
+def _message_symbol_prefix(protocol_prefix: str, message: ProtocolMessage | MessageIR) -> str:
+    return f"{protocol_prefix}_{_message_component_name(message)}"
+
+
 def _message_to_protocol_message(message_ir: MessageIR) -> ProtocolMessage:
     fields: list[ProtocolField] = []
     ordered = {field.canonical_name: field for field in message_ir.fields}
@@ -345,6 +358,10 @@ def _message_to_protocol_message(message_ir: MessageIR) -> ProtocolMessage:
 
 
 def _message_size_expr(message_ir: MessageIR, prefix: str) -> str:
+    if message_ir.composite_tails:
+        total_length_field = message_ir.composite_tails[0].total_length_field
+        if total_length_field:
+            return f"((size_t){_field_ref_to_c(total_length_field, prefix)})"
     if message_ir.total_size_bytes is not None:
         return str(message_ir.total_size_bytes)
     variable_fields = [field for field in message_ir.fields if field.is_variable_length]
@@ -360,6 +377,23 @@ def _field_ref_to_c(field_ref: str, prefix: str = "msg->") -> str:
     return f"{prefix}{_to_lower_snake(member)}"
 
 
+def _storage_type_bits(storage_type: str | None) -> int | None:
+    return {
+        "uint8_t": 8,
+        "uint16_t": 16,
+        "uint32_t": 32,
+        "uint64_t": 64,
+    }.get(storage_type or "")
+
+
+def _uint_literal(value: int) -> str:
+    if value > 0xFFFFFFFF:
+        return f"{value}ULL"
+    if value > 0xFFFF:
+        return f"{value}u"
+    return str(value)
+
+
 def _fixed_field_size_bytes(field: FieldIR) -> int | None:
     if field.is_variable_length:
         return None
@@ -368,6 +402,23 @@ def _fixed_field_size_bytes(field: FieldIR) -> int | None:
     if field.resolved_bit_width is None or field.resolved_bit_width % 8 != 0:
         return None
     return field.resolved_bit_width // 8
+
+
+def _render_write_container_bytes(container_var: str, container: PackedContainerLayout) -> list[str]:
+    return [
+        f"buf[{container.start_byte_offset + index}] = (uint8_t)(({container_var} >> {container.size_bits - ((index + 1) * 8)}) & 0xffu);"
+        for index in range(container.size_bits // 8)
+    ]
+
+
+def _render_read_container_bytes(container_var: str, container: PackedContainerLayout) -> list[str]:
+    lines = [f"uint64_t {container_var} = 0;"]
+    for index in range(container.size_bits // 8):
+        shift = container.size_bits - ((index + 1) * 8)
+        lines.append(
+            f"{container_var} |= ((uint64_t)buf[{container.start_byte_offset + index}] << {shift});"
+        )
+    return lines
 
 
 def _struct_field_entries(field: FieldIR) -> list[dict[str, str]]:
@@ -460,6 +511,18 @@ def _validation_checks(message_ir: MessageIR) -> list[dict[str, str]]:
 
     for field_name in message_ir.normalized_field_order:
         field = ordered[field_name]
+        storage_bits = _storage_type_bits(field.storage_type)
+        if (
+            not field.is_array
+            and storage_bits is not None
+            and field.resolved_bit_width is not None
+            and field.resolved_bit_width < storage_bits
+        ):
+            max_value = (1 << field.resolved_bit_width) - 1
+            _add(
+                f"({_field_ref_to_c(field.canonical_name)} <= {_uint_literal(max_value)})",
+                f"{field.name} fits within {field.resolved_bit_width} wire bits",
+            )
         if field.const_value is not None:
             _add(f"({_field_ref_to_c(field.canonical_name)} == {field.const_value})", f"{field.name} matches fixed value")
         enum_values = _enum_values_for_field(message_ir, field)
@@ -504,10 +567,93 @@ def _enum_contexts(message_ir: MessageIR, symbol_prefix: str) -> list[dict]:
     return contexts
 
 
+def _candidate_ir_lookup(schema: ProtocolSchema) -> dict[str, MessageIR]:
+    return {message_ir.canonical_name: message_ir for message_ir in _resolve_message_irs(schema)}
+
+
+def _tail_kind_token(candidate_ir: MessageIR) -> str:
+    return _to_upper_snake(candidate_ir.canonical_name.replace("bfd_auth_", "").replace("bfd_", ""))
+
+
+def _tail_kind_symbol(symbol_prefix: str, candidate_ir: MessageIR) -> str:
+    return f"{symbol_prefix}_{_tail_kind_token(candidate_ir)}"
+
+
+def _message_struct_name(protocol_prefix: str, message_ir: MessageIR) -> str:
+    return _message_symbol_prefix(protocol_prefix, message_ir)
+
+
+def _message_pack_function(protocol_prefix: str, message_ir: MessageIR) -> str:
+    return f"{_message_struct_name(protocol_prefix, message_ir)}_pack"
+
+
+def _message_unpack_function(protocol_prefix: str, message_ir: MessageIR) -> str:
+    return f"{_message_struct_name(protocol_prefix, message_ir)}_unpack"
+
+
+def _message_validate_function(protocol_prefix: str, message_ir: MessageIR) -> str:
+    return f"{_message_struct_name(protocol_prefix, message_ir)}_validate"
+
+
+def _dispatch_selector_values(message_ir: MessageIR, values: list[int]) -> str:
+    ordered = {field.canonical_name: field for field in message_ir.fields}
+    for field_name in message_ir.normalized_field_order:
+        field = ordered[field_name]
+        enum_values = _enum_values_for_field(message_ir, field)
+        if enum_values and any(value in enum_values for value in values):
+            conditions = " || ".join(f"(auth_type == {value})" for value in values)
+            return conditions
+    return " || ".join(f"(auth_type == {value})" for value in values)
+
+
+def _packed_container_lookup(message_ir: MessageIR) -> tuple[dict[str, PackedContainerLayout], list[PackedContainerLayout]]:
+    containers, _ = build_packed_containers(message_ir)
+    by_field: dict[str, PackedContainerLayout] = {}
+    for container in containers:
+        for field_name in container.field_names:
+            by_field[field_name] = container
+    return by_field, containers
+
+
+def _pack_container_steps(message_ir: MessageIR, container: PackedContainerLayout) -> list[str]:
+    fields_by_name = {field.canonical_name: field for field in message_ir.fields}
+    container_var = f"packed_word_{container.start_byte_offset}"
+    lines = [f"uint64_t {container_var} = 0;"]
+    for packed_field in container.fields:
+        field = fields_by_name[packed_field.canonical_name]
+        member = _field_member_name(field)
+        lines.append(
+            f"{container_var} |= ((((uint64_t)msg->{member}) & {_uint_literal(packed_field.mask)}) << {packed_field.shift_bits});"
+        )
+    lines.extend(_render_write_container_bytes(container_var, container))
+    return lines
+
+
+def _unpack_container_steps(message_ir: MessageIR, container: PackedContainerLayout) -> list[str]:
+    fields_by_name = {field.canonical_name: field for field in message_ir.fields}
+    container_var = f"packed_word_{container.start_byte_offset}"
+    lines = _render_read_container_bytes(container_var, container)
+    for packed_field in container.fields:
+        field = fields_by_name[packed_field.canonical_name]
+        lines.append(
+            f"msg->{_field_member_name(field)} = ({field.storage_type})(({container_var} >> {packed_field.shift_bits}) & {_uint_literal(packed_field.mask)});"
+        )
+    return lines
+
+
 def _pack_steps(message_ir: MessageIR) -> list[str]:
     steps: list[str] = []
     ordered = {field.canonical_name: field for field in message_ir.fields}
+    container_by_field, _ = _packed_container_lookup(message_ir)
+    emitted_containers: set[str] = set()
     for field_name in message_ir.normalized_field_order:
+        container = container_by_field.get(field_name)
+        if container is not None:
+            if container.container_id in emitted_containers:
+                continue
+            steps.extend(_pack_container_steps(message_ir, container))
+            emitted_containers.add(container.container_id)
+            continue
         field = ordered[field_name]
         if field.resolved_byte_offset is None:
             raise ValueError(f"Field {field.canonical_name} is missing resolved offset")
@@ -527,7 +673,16 @@ def _pack_steps(message_ir: MessageIR) -> list[str]:
 def _unpack_steps(message_ir: MessageIR) -> list[str]:
     steps: list[str] = []
     ordered = {field.canonical_name: field for field in message_ir.fields}
+    container_by_field, _ = _packed_container_lookup(message_ir)
+    emitted_containers: set[str] = set()
     for field_name in message_ir.normalized_field_order:
+        container = container_by_field.get(field_name)
+        if container is not None:
+            if container.container_id in emitted_containers:
+                continue
+            steps.extend(_unpack_container_steps(message_ir, container))
+            emitted_containers.add(container.container_id)
+            continue
         field = ordered[field_name]
         if field.resolved_byte_offset is None:
             raise ValueError(f"Field {field.canonical_name} is missing resolved offset")
@@ -573,6 +728,15 @@ def _sample_value_assignment(field: FieldIR, message_ir: MessageIR) -> list[str]
         return [f"input.{name} = {field.const_value};"]
     if enum_values:
         return [f"input.{name} = {enum_values[0]};"]
+    storage_bits = _storage_type_bits(field.storage_type)
+    if (
+        storage_bits is not None
+        and field.resolved_bit_width is not None
+        and field.resolved_bit_width < storage_bits
+    ):
+        max_value = (1 << field.resolved_bit_width) - 1
+        sample_value = min(max_value, 3)
+        return [f"input.{name} = {sample_value};"]
     if field.storage_type == "uint8_t":
         return [f"input.{name} = 7;"]
     if field.storage_type == "uint16_t":
@@ -603,10 +767,210 @@ def _roundtrip_assertions(message_ir: MessageIR) -> list[str]:
     return assertions
 
 
+def _composite_tail_contexts(
+    protocol_prefix: str,
+    schema: ProtocolSchema,
+    message_ir: MessageIR,
+) -> list[dict]:
+    registry = _candidate_ir_lookup(schema)
+    contexts: list[dict] = []
+    owner_symbol_prefix = _message_symbol_prefix(protocol_prefix, message_ir)
+    for tail in message_ir.composite_tails:
+        enum_name = f"{owner_symbol_prefix}_{_to_lower_snake(tail.name)}_kind"
+        kind_member = f"{_to_lower_snake(tail.name)}_kind"
+        slot_member = _to_lower_snake(tail.name)
+        fixed_prefix_bytes = (tail.fixed_prefix_bits or 0) // 8
+        candidates = []
+        enum_values = [{"name": f"{enum_name}_NONE", "value": 0, "description": "tail absent"}]
+        for index, case in enumerate(tail.dispatch_cases, start=1):
+            candidate_ir = registry.get(case.message_ir_id)
+            if candidate_ir is None:
+                continue
+            member_name = _to_lower_snake(case.message_ir_id)
+            kind_symbol = _tail_kind_symbol(enum_name, candidate_ir)
+            enum_values.append(
+                {
+                    "name": kind_symbol,
+                    "value": index,
+                    "description": case.description or candidate_ir.display_name,
+                }
+            )
+            candidates.append(
+                {
+                    "kind_symbol": kind_symbol,
+                    "member_name": member_name,
+                    "struct_name": _message_struct_name(protocol_prefix, candidate_ir),
+                    "header_name": _header_name_for_message(protocol_prefix, candidate_ir),
+                    "pack_function": _message_pack_function(protocol_prefix, candidate_ir),
+                    "unpack_function": _message_unpack_function(protocol_prefix, candidate_ir),
+                    "validate_function": _message_validate_function(protocol_prefix, candidate_ir),
+                    "selector_values": list(case.selector_values),
+                    "selector_condition": " || ".join(f"(auth_type == {value})" for value in case.selector_values),
+                    "size_expr": _message_size_expr(candidate_ir, f"msg->{member_name}."),
+                    "size_expr_input": _message_size_expr(candidate_ir, f"input.{member_name}."),
+                    "display_name": candidate_ir.display_name,
+                }
+            )
+        contexts.append(
+            {
+                "slot": tail,
+                "enum_name": enum_name,
+                "enum_values": enum_values,
+                "kind_member": kind_member,
+                "fixed_prefix_bytes": fixed_prefix_bytes,
+                "slot_member": slot_member,
+                "candidates": candidates,
+            }
+        )
+    return contexts
+
+
 def _resolve_message_irs(schema: ProtocolSchema) -> list[MessageIR]:
     if schema.message_irs:
         return list(schema.message_irs)
     return lower_protocol_messages_to_message_ir(schema.protocol_name, schema.messages)
+
+
+def _composite_extra_struct_fields(tail_contexts: list[dict]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for tail in tail_contexts:
+        entries.append(
+            {
+                "declaration": f"{tail['enum_name']} {tail['kind_member']};",
+                "description": f"host-side dispatch selector for {tail['slot'].name}",
+            }
+        )
+        for candidate in tail["candidates"]:
+            entries.append(
+                {
+                    "declaration": f"{candidate['struct_name']} {candidate['member_name']};",
+                    "description": f"{candidate['display_name']} payload",
+                }
+            )
+    return entries
+
+
+def _composite_extra_headers(tail_contexts: list[dict]) -> list[str]:
+    headers: list[str] = []
+    for tail in tail_contexts:
+        for candidate in tail["candidates"]:
+            header_name = candidate["header_name"]
+            if header_name not in headers:
+                headers.append(header_name)
+    return headers
+
+
+def _composite_extra_enums(tail_contexts: list[dict]) -> list[dict]:
+    return [{"enum_name": tail["enum_name"], "values": tail["enum_values"]} for tail in tail_contexts]
+
+
+def _composite_validate_statements(tail_contexts: list[dict]) -> list[str]:
+    statements: list[str] = []
+    for tail in tail_contexts:
+        prefix = tail["fixed_prefix_bytes"]
+        kind_member = tail["kind_member"]
+        none_symbol = f"{tail['enum_name']}_NONE"
+        length_field = _field_ref_to_c(tail["slot"].total_length_field)
+        presence_field = _field_ref_to_c("header.auth_present")
+        statements.append(f"if ({presence_field} == 0) {{")
+        statements.append(f"    if ({length_field} != {prefix}) return -1;")
+        statements.append(f"    if (msg->{kind_member} != {none_symbol}) return -1;")
+        statements.append("} else {")
+        statements.append(f"    if ({length_field} <= {prefix}) return -1;")
+        statements.append(f"    switch (msg->{kind_member}) {{")
+        for candidate in tail["candidates"]:
+            statements.append(f"    case {candidate['kind_symbol']}:")
+            statements.append(f"        if ({candidate['validate_function']}(&msg->{candidate['member_name']}) != 0) return -1;")
+            statements.append(f"        if ({length_field} != ({prefix} + {candidate['size_expr']})) return -1;")
+            statements.append("        break;")
+        statements.append("    default:")
+        statements.append("        return -1;")
+        statements.append("    }")
+        statements.append("}")
+    return statements
+
+
+def _composite_pack_steps(tail_contexts: list[dict]) -> list[str]:
+    steps: list[str] = []
+    for tail in tail_contexts:
+        prefix = tail["fixed_prefix_bytes"]
+        kind_member = tail["kind_member"]
+        none_symbol = f"{tail['enum_name']}_NONE"
+        length_field = _field_ref_to_c(tail["slot"].total_length_field)
+        presence_field = _field_ref_to_c("header.auth_present")
+        steps.append(f"if ({presence_field} == 0) {{")
+        steps.append(f"    if ({length_field} != {prefix}) return -1;")
+        steps.append(f"    if (msg->{kind_member} != {none_symbol}) return -1;")
+        steps.append("} else {")
+        steps.append(f"    switch (msg->{kind_member}) {{")
+        for candidate in tail["candidates"]:
+            steps.append(f"    case {candidate['kind_symbol']}: {{")
+            steps.append(
+                f"        int tail_written = {candidate['pack_function']}(&msg->{candidate['member_name']}, buf + {prefix}, buf_len - {prefix});"
+            )
+            steps.append("        if (tail_written < 0) return -1;")
+            steps.append(f"        if ({length_field} != (uint8_t)({prefix} + tail_written)) return -1;")
+            steps.append("        break;")
+            steps.append("    }")
+        steps.append("    default:")
+        steps.append("        return -1;")
+        steps.append("    }")
+        steps.append("}")
+    return steps
+
+
+def _composite_unpack_steps(tail_contexts: list[dict]) -> list[str]:
+    steps: list[str] = []
+    for tail in tail_contexts:
+        prefix = tail["fixed_prefix_bytes"]
+        kind_member = tail["kind_member"]
+        none_symbol = f"{tail['enum_name']}_NONE"
+        length_field = _field_ref_to_c(tail["slot"].total_length_field)
+        presence_field = _field_ref_to_c("header.auth_present")
+        steps.append(f"if ({presence_field} == 0) {{")
+        steps.append(f"    if ({length_field} != {prefix}) return -1;")
+        steps.append(f"    msg->{kind_member} = {none_symbol};")
+        for candidate in tail["candidates"]:
+            steps.append(f"    memset(&msg->{candidate['member_name']}, 0, sizeof(msg->{candidate['member_name']}));")
+        steps.append("} else {")
+        steps.append(f"    size_t tail_size = ((size_t){length_field}) - {prefix};")
+        steps.append("    uint8_t auth_type = 0;")
+        steps.append(f"    if ({length_field} <= {prefix}) return -1;")
+        steps.append(f"    if (buf_len < (size_t){length_field}) return -1;")
+        steps.append(f"    auth_type = buf[{prefix}];")
+        for index, candidate in enumerate(tail["candidates"]):
+            if index == 0:
+                steps.append(f"    if ({candidate['selector_condition']}) {{")
+            else:
+                steps.append(f"    }} else if ({candidate['selector_condition']}) {{")
+            steps.append(f"        msg->{kind_member} = {candidate['kind_symbol']};")
+            steps.append(
+                f"        if ({candidate['unpack_function']}(&msg->{candidate['member_name']}, buf + {prefix}, tail_size) != (int)tail_size) return -1;"
+            )
+        steps.append("    } else {")
+        steps.append("        return -1;")
+        steps.append("    }")
+        steps.append("}")
+    return steps
+
+
+def _composite_roundtrip_setup(tail_contexts: list[dict]) -> list[str]:
+    lines: list[str] = []
+    for tail in tail_contexts:
+        prefix = tail["fixed_prefix_bytes"]
+        kind_member = tail["kind_member"]
+        none_symbol = f"{tail['enum_name']}_NONE"
+        lines.append(f"input.auth_present = 0;")
+        lines.append(f"input.length = {prefix};")
+        lines.append(f"input.{kind_member} = {none_symbol};")
+    return lines
+
+
+def _composite_roundtrip_assertions(tail_contexts: list[dict]) -> list[str]:
+    assertions: list[str] = []
+    for tail in tail_contexts:
+        assertions.append(f"if (decoded.{tail['kind_member']} != input.{tail['kind_member']}) return 1;")
+    return assertions
 
 
 def _build_message_ir_context(
@@ -616,15 +980,24 @@ def _build_message_ir_context(
     header_name: str,
 ) -> dict:
     display_name = _message_display_name(message_ir)
-    component_name = _to_lower_snake(display_name)
-    symbol_prefix = f"{protocol_prefix}_{component_name}"
+    component_name = _message_component_name(message_ir)
+    symbol_prefix = _message_symbol_prefix(protocol_prefix, message_ir)
     ordered_lookup = {field.canonical_name: field for field in message_ir.fields}
     ordered_fields = [ordered_lookup[name] for name in message_ir.normalized_field_order if name in ordered_lookup]
+    tail_contexts = _composite_tail_contexts(protocol_prefix, schema, message_ir)
     struct_fields = [entry for field in ordered_fields for entry in _struct_field_entries(field)]
-    fixed_prefix_bytes = min(
+    struct_fields.extend(_composite_extra_struct_fields(tail_contexts))
+    variable_prefix_bytes = min(
         (field.resolved_byte_offset or 0 for field in ordered_fields if field.is_variable_length),
         default=None,
     )
+    composite_prefix_bytes = min((tail["fixed_prefix_bytes"] for tail in tail_contexts), default=None)
+    fixed_prefix_candidates = [value for value in (variable_prefix_bytes, composite_prefix_bytes) if value is not None]
+    fixed_prefix_bytes = min(fixed_prefix_candidates) if fixed_prefix_candidates else None
+    extra_headers = _composite_extra_headers(tail_contexts)
+    enum_domains = _enum_contexts(message_ir, symbol_prefix) + _composite_extra_enums(tail_contexts)
+    roundtrip_setup = [line for field in ordered_fields for line in _sample_value_assignment(field, message_ir)]
+    roundtrip_setup.extend(_composite_roundtrip_setup(tail_contexts))
     return {
         "protocol_prefix": protocol_prefix,
         "component_name": component_name,
@@ -633,13 +1006,15 @@ def _build_message_ir_context(
         "pack_function": f"{symbol_prefix}_pack",
         "unpack_function": f"{symbol_prefix}_unpack",
         "validate_function": f"{symbol_prefix}_validate",
+        "extra_headers": extra_headers,
         "struct_fields": struct_fields,
-        "enum_domains": _enum_contexts(message_ir, symbol_prefix),
-        "pack_steps": _pack_steps(message_ir),
-        "unpack_steps": _unpack_steps(message_ir),
+        "enum_domains": enum_domains,
+        "pack_steps": _pack_steps(message_ir) + _composite_pack_steps(tail_contexts),
+        "unpack_steps": _unpack_steps(message_ir) + _composite_unpack_steps(tail_contexts),
         "validate_checks": _validation_checks(message_ir),
-        "roundtrip_setup": [line for field in ordered_fields for line in _sample_value_assignment(field, message_ir)],
-        "roundtrip_assertions": _roundtrip_assertions(message_ir),
+        "validate_statements": _composite_validate_statements(tail_contexts),
+        "roundtrip_setup": roundtrip_setup,
+        "roundtrip_assertions": _roundtrip_assertions(message_ir) + _composite_roundtrip_assertions(tail_contexts),
         "source_document": schema.source_document or schema.protocol_name,
         "generator_name": GENERATOR_NAME,
         "include_guard": f"{_to_upper_snake(header_name)}_H",

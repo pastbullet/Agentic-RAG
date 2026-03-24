@@ -1,4 +1,0 @@
-# file: /Users/zwy/毕设/Kiro/src/extract/pipeline.py
-# hypothesis_version: 6.151.9
-
-[0.0, '<missing-node-id>', 'ANTHROPIC_MODEL_NAME', 'OPENAI_MODEL_NAME', 'anthropic', 'children', 'classify', 'claude', 'codegen', 'config.yaml', 'content_dir', 'data/out', 'error', 'error_count', 'error_handling', 'extract', 'failed_node_ids', 'failure_count', 'general_description', 'gpt-4o', 'is_skeleton', 'merge', 'message_count', 'message_format', 'model', 'node_id', 'nodes', 'openai', 'procedure_count', 'procedure_rule', 'schema_path', 'skipped_by_label', 'skipped_count', 'skipped_node_ids', 'state_machine', 'state_machine_count', 'structure', 'success_count', 'timer_count', 'timer_rule', 'title', 'utf-8', 'verify']

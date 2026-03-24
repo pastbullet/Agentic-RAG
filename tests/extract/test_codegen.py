@@ -265,10 +265,10 @@ def test_generate_code_renders_synthetic_bfd_schema(tmp_path: Path):
     result = generate_code(schema, str(tmp_path))
 
     assert len(result.files) == 5
-    header_text = (tmp_path / "bfd_msg_bfd_control_packet.h").read_text(encoding="utf-8")
+    header_text = (tmp_path / "bfd_msg_bfd_control_packet_mandatory_section.h").read_text(encoding="utf-8")
     source_text = (tmp_path / "bfd_sm_bfd_session.c").read_text(encoding="utf-8")
-    assert "typedef struct bfd_bfd_control_packet" in header_text
-    assert "bfd_bfd_control_packet_pack" in header_text
+    assert "typedef struct bfd_bfd_control_packet_mandatory_section" in header_text
+    assert "bfd_bfd_control_packet_mandatory_section_pack" in header_text
     assert "return bfd_bfd_session_STATE_UP;" in source_text
 
 

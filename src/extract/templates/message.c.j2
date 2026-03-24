@@ -13,6 +13,9 @@ int {{ validate_function }}(const {{ struct_name }} *msg) {
         return -1;
     }
 {% endfor -%}
+{% for line in validate_statements -%}
+    {{ line }}
+{% endfor -%}
     return 0;
 }
 
@@ -27,6 +30,7 @@ int {{ pack_function }}(const {{ struct_name }} *msg, uint8_t *buf, size_t buf_l
     if (buf_len < total_size) {
         return -1;
     }
+    memset(buf, 0, total_size);
 {% for line in pack_steps -%}
     {{ line }}
 {% endfor -%}

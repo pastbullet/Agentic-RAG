@@ -1,4 +1,0 @@
-# file: /Users/zwy/毕设/Kiro/src/context/id_gen.py
-# hypothesis_version: 6.151.9
-
-['sess_%Y%m%d_%H%M%S']

@@ -1,4 +1,0 @@
-# file: /Users/zwy/毕设/Kiro/src/context/updater.py
-# hypothesis_version: 6.151.9
-
-['end_index', 'error', 'get_page_content', 'is_skeleton', 'node_id', 'page', 'pages', 'parent_path', 'part', 'start_index', 'structure', 'summary', 'title']

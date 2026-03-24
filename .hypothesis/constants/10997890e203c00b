@@ -1,4 +1,0 @@
-# file: /Users/zwy/毕设/Kiro/src/extract/verify.py
-# hypothesis_version: 6.151.9
-
-['*.[ch]', '*.c', '-I', '-Wall', '-fsyntax-only', 'VerifyReport', 'check', 'detail', 'enum', 'error', 'file', 'found', 'function', 'gcc', 'kind', 'line', 'passed', 'source', 'struct', 'symbol', 'test_name', 'test_roundtrip.c', 'test_roundtrip.c.j2', 'test_roundtrip_stub', 'utf-8']

@@ -4,6 +4,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+{% for include_name in extra_headers -%}
+#include "{{ include_name }}"
+{% endfor %}
 
 #ifdef __cplusplus
 extern "C" {
