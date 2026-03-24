@@ -16,7 +16,8 @@ from src.extract.codegen import (
     _to_lower_snake,
     standardize_msg_name,
 )
-from src.models import ProtocolMessage, ProtocolSchema
+from src.extract.message_ir import lower_protocol_messages_to_message_ir, ready_message_irs
+from src.models import MessageIR, ProtocolMessage, ProtocolSchema
 
 
 @dataclass
@@ -108,6 +109,7 @@ def _infer_expected_symbols_from_generated_files(
                 {"symbol": f"{prefix}_{component}", "kind": "struct", "source": component},
                 {"symbol": f"{prefix}_{component}_pack", "kind": "function", "source": component},
                 {"symbol": f"{prefix}_{component}_unpack", "kind": "function", "source": component},
+                {"symbol": f"{prefix}_{component}_validate", "kind": "function", "source": component},
             ]
         )
     return symbols
@@ -115,7 +117,8 @@ def _infer_expected_symbols_from_generated_files(
 
 def _generate_roundtrip_stub(
     generated_msg_headers: list[str],
-    generated_msgs: list[ProtocolMessage],
+    generated_messages: list[ProtocolMessage],
+    generated_message_irs: list[MessageIR],
     output_dir: str,
     protocol_prefix: str,
     source_document: str,
@@ -125,13 +128,13 @@ def _generate_roundtrip_stub(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     contexts = []
-    for message in generated_msgs:
-        header_name = f"{protocol_prefix}_msg_{_to_lower_snake(standardize_msg_name(message.name))}.h"
+    for message_ir in generated_message_irs:
+        header_name = f"{protocol_prefix}_msg_{_to_lower_snake(standardize_msg_name(message_ir.display_name))}.h"
         contexts.append(
             _build_message_context(
                 protocol_prefix,
                 ProtocolSchema(protocol_name=protocol_prefix, source_document=source_document),
-                message,
+                message_ir,
                 header_name,
             )
         )
@@ -146,6 +149,24 @@ def _generate_roundtrip_stub(
     return str(stub_path)
 
 
+def _compile_and_run_roundtrip(generated_dir: str, stub_path: str) -> tuple[bool, str]:
+    generated_path = Path(generated_dir)
+    binary_path = generated_path / "test_roundtrip.bin"
+    c_files = sorted(
+        str(path)
+        for path in generated_path.glob("*_msg_*.c")
+        if path.name != "test_roundtrip.c"
+    )
+    command = ["gcc", "-Wall", "-I", generated_dir, *c_files, stub_path, "-o", str(binary_path)]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        return False, completed.stderr.strip() or completed.stdout.strip() or "roundtrip compile failed"
+    executed = subprocess.run([str(binary_path)], capture_output=True, text=True, check=False)
+    if executed.returncode != 0:
+        return False, executed.stderr.strip() or executed.stdout.strip() or f"roundtrip runtime failed with exit code {executed.returncode}"
+    return True, ""
+
+
 def verify_generated_code(
     generated_dir: str,
     schema: ProtocolSchema,
@@ -153,6 +174,7 @@ def verify_generated_code(
     expected_symbols: list[dict] | None = None,
     generated_msg_headers: list[str] | None = None,
     generated_msgs: list[ProtocolMessage] | None = None,
+    generated_message_irs: list[MessageIR] | None = None,
 ) -> VerifyReport:
     generated_path = Path(generated_dir)
     if not generated_path.exists():
@@ -171,6 +193,15 @@ def verify_generated_code(
             header_name = f"{prefix}_msg_{_to_lower_snake(standardize_msg_name(message.name))}.h"
             if header_name in header_names:
                 generated_msgs.append(message)
+    if generated_message_irs is None:
+        lowered = schema.message_irs or lower_protocol_messages_to_message_ir(schema.protocol_name, schema.messages)
+        ready_irs = ready_message_irs(lowered)
+        header_names = {Path(path).name for path in generated_msg_headers}
+        generated_message_irs = []
+        for message_ir in ready_irs:
+            header_name = f"{prefix}_msg_{_to_lower_snake(standardize_msg_name(message_ir.display_name))}.h"
+            if header_name in header_names:
+                generated_message_irs.append(message_ir)
 
     report = VerifyReport()
     generated_state_machine_count = len(list(generated_path.glob(f"{prefix}_sm_*.h")))
@@ -187,6 +218,7 @@ def verify_generated_code(
     stub_path = _generate_roundtrip_stub(
         generated_msg_headers,
         generated_msgs,
+        generated_message_irs,
         generated_dir,
         prefix,
         schema.source_document or doc_name,
@@ -205,8 +237,22 @@ def verify_generated_code(
             "error": "" if stub_passed else "test_roundtrip.c has syntax errors",
         }
     ]
+    runtime_failed = False
+    if report.syntax_checked and stub_passed:
+        runtime_passed, runtime_error = _compile_and_run_roundtrip(generated_dir, stub_path)
+        report.test_results.append(
+            {
+                "test_name": "test_roundtrip_runtime",
+                "passed": runtime_passed,
+                "error": runtime_error,
+            }
+        )
+        if not runtime_passed:
+            runtime_failed = True
     report.syntax_ok = report.syntax_checked and not report.syntax_errors
     if not report.syntax_checked:
+        report.syntax_ok = False
+    if runtime_failed:
         report.syntax_ok = False
 
     passed_structural = sum(1 for item in report.structural_checks if item["passed"])

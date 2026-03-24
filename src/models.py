@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -136,6 +137,131 @@ class ProtocolMessage(BaseModel):
     source_pages: list[int] = []
 
 
+class NormalizationStatus(str, Enum):
+    DRAFT = "draft"
+    READY = "ready"
+    BLOCKED = "blocked"
+
+
+class IRDiagnostic(BaseModel):
+    level: Literal["warning", "error"]
+    code: str
+    message: str
+    source_pages: list[int] = []
+    source_node_ids: list[str] = []
+
+
+class EnumValue(BaseModel):
+    value: int
+    name: str
+    description: str | None = None
+
+
+class EnumDomain(BaseModel):
+    enum_id: str
+    field_name: str
+    values: list[EnumValue] = []
+
+
+class PresenceRule(BaseModel):
+    rule_id: str
+    target_kind: str
+    target_id: str
+    expression: str
+    depends_on_fields: list[str] = []
+    description: str | None = None
+
+
+class ValidationRule(BaseModel):
+    rule_id: str
+    target_kind: str | None = None
+    target_id: str | None = None
+    kind: str
+    expression: str
+    severity: Literal["warning", "error"] = "error"
+    depends_on_fields: list[str] = []
+    description: str | None = None
+
+
+class CodegenHints(BaseModel):
+    preferred_template: str
+    generate_pack: bool = True
+    generate_unpack: bool = True
+    generate_validate: bool = True
+    runtime_helpers: list[str] = []
+
+
+class SectionIR(BaseModel):
+    section_id: str
+    name: str
+    canonical_name: str
+    kind: str
+    parent_section_id: str | None = None
+    declared_bit_offset: int | None = None
+    declared_byte_offset: int | None = None
+    declared_bit_width: int | None = None
+    resolved_bit_offset: int | None = None
+    resolved_byte_offset: int | None = None
+    resolved_bit_width: int | None = None
+    optional: bool = False
+    presence_rule_ids: list[str] = []
+    field_ids: list[str] = []
+    source_pages: list[int] = []
+
+
+class FieldIR(BaseModel):
+    field_id: str
+    name: str
+    canonical_name: str
+    declared_bit_width: int | None = None
+    declared_bit_offset: int | None = None
+    declared_byte_offset: int | None = None
+    resolved_bit_width: int | None = None
+    resolved_bit_offset: int | None = None
+    resolved_byte_offset: int | None = None
+    storage_type: str | None = None
+    signed: bool = False
+    endianness: str | None = None
+    is_bitfield: bool = False
+    bit_lsb_index: int | None = None
+    bit_msb_index: int | None = None
+    is_array: bool = False
+    array_len: int | None = None
+    is_variable_length: bool = False
+    length_from_field: str | None = None
+    optional: bool = False
+    presence_rule_ids: list[str] = []
+    const_value: int | str | None = None
+    enum_domain_id: str | None = None
+    description: str | None = None
+    source_pages: list[int] = []
+    source_node_ids: list[str] = []
+
+
+class MessageIR(BaseModel):
+    ir_id: str
+    protocol_name: str
+    canonical_name: str
+    display_name: str
+    source_message_names: list[str] = []
+    source_pages: list[int] = []
+    source_node_ids: list[str] = []
+    layout_kind: str = ""
+    total_size_bits: int | None = None
+    total_size_bytes: int | None = None
+    min_size_bits: int | None = None
+    max_size_bits: int | None = None
+    sections: list[SectionIR] = []
+    fields: list[FieldIR] = []
+    normalized_field_order: list[str] = []
+    presence_rules: list[PresenceRule] = []
+    validation_rules: list[ValidationRule] = []
+    enum_domains: list[EnumDomain] = []
+    codegen_hints: CodegenHints = CodegenHints(preferred_template="message_ir_v1")
+    diagnostics: list[IRDiagnostic] = []
+    normalization_status: NormalizationStatus = NormalizationStatus.DRAFT
+
+
 class ProcedureStep(BaseModel):
     step_number: int
     condition: str = ""
@@ -169,6 +295,7 @@ class ProtocolSchema(BaseModel):
     protocol_name: str
     state_machines: list[ProtocolStateMachine] = []
     messages: list[ProtocolMessage] = []
+    message_irs: list[MessageIR] = []
     procedures: list[ProcedureRule] = []
     timers: list[TimerConfig] = []
     errors: list[ErrorRule] = []

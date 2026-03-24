@@ -9,12 +9,21 @@
 extern "C" {
 #endif
 
+{% for enum_domain in enum_domains -%}
+typedef enum {{ enum_domain["enum_name"] }} {
+{% for value in enum_domain["values"] -%}
+    {{ value["name"] }} = {{ value["value"] }}{{ ',' if not loop.last else '' }}{% if value["description"] %} /* {{ value["description"] }} */{% endif %}
+{% endfor -%}
+} {{ enum_domain["enum_name"] }};
+
+{% endfor -%}
 typedef struct {{ struct_name }} {
-{% for field in fields -%}
-    {{ field.type_info.render_declaration(field.name) }}{% if field.description %} /* {{ field.description }} */{% endif %}
+{% for field in struct_fields -%}
+    {{ field.declaration }}{% if field.description %} /* {{ field.description }} */{% endif %}
 {% endfor -%}
 } {{ struct_name }};
 
+int {{ validate_function }}(const {{ struct_name }} *msg);
 int {{ pack_function }}(const {{ struct_name }} *msg, uint8_t *buf, size_t buf_len);
 int {{ unpack_function }}({{ struct_name }} *msg, const uint8_t *buf, size_t buf_len);
 

@@ -26,6 +26,7 @@ from src.extract.evidence_card import (
     generate_evidence_cards,
     load_review_decisions,
 )
+from src.extract.message_ir import lower_protocol_messages_to_message_ir
 from src.extract.extractors import (
     BaseExtractor,
     ErrorExtractor,
@@ -50,6 +51,7 @@ from src.extract.merge import (
 from src.extract.verify import verify_generated_code
 from src.models import (
     ErrorRule,
+    MessageIR,
     NodeSemanticLabel,
     ProcedureRule,
     ProtocolMessage,
@@ -283,6 +285,7 @@ def _serialize_codegen_result(result: CodegenResult, generated_dir: Path) -> dic
         "expected_symbols": list(result.expected_symbols),
         "generated_msg_headers": list(result.generated_msg_headers),
         "generated_msgs": [message.model_dump() for message in result.generated_msgs],
+        "generated_message_irs": [message_ir.model_dump() for message_ir in result.generated_message_irs],
     }
 
 
@@ -290,6 +293,12 @@ def _deserialize_generated_msgs(payload: list[dict] | None) -> list[ProtocolMess
     if payload is None:
         return None
     return [ProtocolMessage(**item) for item in payload]
+
+
+def _deserialize_generated_message_irs(payload: list[dict] | None) -> list[MessageIR] | None:
+    if payload is None:
+        return None
+    return [MessageIR(**item) for item in payload]
 
 
 async def run_pipeline(
@@ -653,9 +662,17 @@ async def run_pipeline(
                 timers=merged_timers,
                 errors=filtered_errors,
             )
+            message_irs = lower_protocol_messages_to_message_ir(
+                protocol_name=doc_stem,
+                messages=merged_messages,
+                extraction_records=extraction_records,
+            )
+            schema.message_irs = message_irs
             schema_path = _artifact_path(doc_stem, "protocol_schema")
+            message_ir_path = _artifact_path(doc_stem, "message_ir")
             schema_path.parent.mkdir(parents=True, exist_ok=True)
             schema_path.write_text(schema.model_dump_json(indent=2), encoding="utf-8")
+            _write_json(message_ir_path, [item.model_dump() for item in message_irs])
             merge_report = build_merge_report(
                 pre=pre_merge_counts,
                 dropped=dropped_empty_counts,
@@ -670,10 +687,13 @@ async def run_pipeline(
             _write_json(merge_report_path, merge_report)
             stage_data = {
                 "schema_path": str(schema_path),
+                "message_ir_path": str(message_ir_path),
                 "merge_report_path": str(merge_report_path),
                 "near_miss_report_path": str(near_miss_report_path),
                 "state_machine_count": len(schema.state_machines),
                 "message_count": len(schema.messages),
+                "message_ir_count": len(message_irs),
+                "ready_message_ir_count": sum(item.normalization_status == "ready" for item in message_irs),
                 "procedure_count": len(schema.procedures),
                 "timer_count": len(schema.timers),
                 "error_count": len(schema.errors),
@@ -743,11 +763,13 @@ async def run_pipeline(
                 expected_symbols: list[dict] | None = None
                 generated_msg_headers: list[str] | None = None
                 generated_msgs: list[ProtocolMessage] | None = None
+                generated_message_irs: list[MessageIR] | None = None
 
                 if codegen_result is not None:
                     expected_symbols = codegen_result.expected_symbols
                     generated_msg_headers = codegen_result.generated_msg_headers
                     generated_msgs = codegen_result.generated_msgs
+                    generated_message_irs = codegen_result.generated_message_irs
                 else:
                     prior_codegen = next(
                         (
@@ -761,6 +783,7 @@ async def run_pipeline(
                         expected_symbols = prior_codegen.get("expected_symbols")
                         generated_msg_headers = prior_codegen.get("generated_msg_headers")
                         generated_msgs = _deserialize_generated_msgs(prior_codegen.get("generated_msgs"))
+                        generated_message_irs = _deserialize_generated_message_irs(prior_codegen.get("generated_message_irs"))
 
                 report = verify_generated_code(
                     str(generated_dir),
@@ -769,6 +792,7 @@ async def run_pipeline(
                     expected_symbols=expected_symbols,
                     generated_msg_headers=generated_msg_headers,
                     generated_msgs=generated_msgs,
+                    generated_message_irs=generated_message_irs,
                 )
                 verify_report_path = _artifact_path(doc_stem, "verify_report")
                 _write_json(verify_report_path, report.to_dict())
