@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/models.py
+# hypothesis_version: 6.151.9
+
+[0.0, 1.0, 'blocked', 'degraded_ready', 'draft', 'error', 'error_handling', 'general_description', 'global', 'message_family', 'message_format', 'message_ir_v1', 'opaque', 'opaque_handle', 'procedure_rule', 'ready', 'state_machine', 'timer_rule', 'warning']

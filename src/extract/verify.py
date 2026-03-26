@@ -16,7 +16,7 @@ from src.extract.codegen import (
     _to_lower_snake,
     standardize_msg_name,
 )
-from src.extract.message_ir import lower_protocol_messages_to_message_ir, ready_message_irs
+from src.extract.message_ir import codegen_eligible_message_irs, lower_protocol_messages_to_message_ir
 from src.models import MessageIR, ProtocolMessage, ProtocolSchema
 
 
@@ -195,10 +195,10 @@ def verify_generated_code(
                 generated_msgs.append(message)
     if generated_message_irs is None:
         lowered = schema.message_irs or lower_protocol_messages_to_message_ir(schema.protocol_name, schema.messages)
-        ready_irs = ready_message_irs(lowered)
+        eligible_irs = codegen_eligible_message_irs(lowered)
         header_names = {Path(path).name for path in generated_msg_headers}
         generated_message_irs = []
-        for message_ir in ready_irs:
+        for message_ir in eligible_irs:
             header_name = f"{prefix}_msg_{_to_lower_snake(standardize_msg_name(message_ir.display_name))}.h"
             if header_name in header_names:
                 generated_message_irs.append(message_ir)

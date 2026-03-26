@@ -27,6 +27,7 @@ from src.extract.evidence_card import (
     load_review_decisions,
 )
 from src.extract.message_ir import lower_protocol_messages_to_message_ir
+from src.extract.message_archetype import build_message_archetype_contributions
 from src.extract.extractors import (
     BaseExtractor,
     ErrorExtractor,
@@ -662,6 +663,11 @@ async def run_pipeline(
                 timers=merged_timers,
                 errors=filtered_errors,
             )
+            message_archetypes = build_message_archetype_contributions(
+                protocol_name=doc_stem,
+                messages=merged_messages,
+                extraction_records=extraction_records,
+            )
             message_irs = lower_protocol_messages_to_message_ir(
                 protocol_name=doc_stem,
                 messages=merged_messages,
@@ -669,9 +675,11 @@ async def run_pipeline(
             )
             schema.message_irs = message_irs
             schema_path = _artifact_path(doc_stem, "protocol_schema")
+            message_archetype_path = _artifact_path(doc_stem, "message_archetypes")
             message_ir_path = _artifact_path(doc_stem, "message_ir")
             schema_path.parent.mkdir(parents=True, exist_ok=True)
             schema_path.write_text(schema.model_dump_json(indent=2), encoding="utf-8")
+            _write_json(message_archetype_path, [item.model_dump() for item in message_archetypes])
             _write_json(message_ir_path, [item.model_dump() for item in message_irs])
             merge_report = build_merge_report(
                 pre=pre_merge_counts,
@@ -687,13 +695,16 @@ async def run_pipeline(
             _write_json(merge_report_path, merge_report)
             stage_data = {
                 "schema_path": str(schema_path),
+                "message_archetype_path": str(message_archetype_path),
                 "message_ir_path": str(message_ir_path),
                 "merge_report_path": str(merge_report_path),
                 "near_miss_report_path": str(near_miss_report_path),
                 "state_machine_count": len(schema.state_machines),
                 "message_count": len(schema.messages),
+                "message_archetype_count": len(message_archetypes),
                 "message_ir_count": len(message_irs),
                 "ready_message_ir_count": sum(item.normalization_status == "ready" for item in message_irs),
+                "degraded_ready_message_ir_count": sum(item.normalization_status == "degraded_ready" for item in message_irs),
                 "procedure_count": len(schema.procedures),
                 "timer_count": len(schema.timers),
                 "error_count": len(schema.errors),

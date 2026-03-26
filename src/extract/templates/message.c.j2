@@ -3,6 +3,11 @@
 
 #include <string.h>
 
+{% for block in extra_helper_definitions -%}
+{{ block }}
+
+{% endfor -%}
+
 int {{ validate_function }}(const {{ struct_name }} *msg) {
     if (msg == NULL) {
         return -1;

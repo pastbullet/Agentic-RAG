@@ -83,3 +83,41 @@ async def test_message_extractor_marks_password_field_as_variable_length():
     assert len(result.fields) == 1
     assert result.fields[0].name == "Password"
     assert result.fields[0].size_bits is None
+
+
+@pytest.mark.asyncio
+async def test_message_extractor_attaches_tcp_archetype_sidecar():
+    extractor = MessageExtractor(
+        FakeLLM(
+            json.dumps(
+                {
+                    "name": "TCP Header",
+                    "fields": [
+                        {"name": "Source Port", "size_bits": 16, "description": "The source port number."},
+                        {"name": "Destination Port", "size_bits": 16, "description": "The destination port number."},
+                        {"name": "Sequence Number", "size_bits": 32, "description": "Sequence number."},
+                        {"name": "Acknowledgment Number", "size_bits": 32, "description": "Acknowledgment number."},
+                        {"name": "Data Offset", "size_bits": 4, "description": "Header size in 32-bit words."},
+                        {"name": "Reserved", "size_bits": 6, "description": "Reserved. Must be zero."},
+                        {"name": "URG", "size_bits": 1, "description": "Urgent."},
+                        {"name": "ACK", "size_bits": 1, "description": "Ack."},
+                        {"name": "PSH", "size_bits": 1, "description": "Push."},
+                        {"name": "RST", "size_bits": 1, "description": "Reset."},
+                        {"name": "SYN", "size_bits": 1, "description": "Sync."},
+                        {"name": "FIN", "size_bits": 1, "description": "Finish."},
+                        {"name": "Window", "size_bits": 16, "description": "Window."},
+                        {"name": "Checksum", "size_bits": 16, "description": "Checksum."},
+                        {"name": "Urgent Pointer", "size_bits": 16, "description": "Urgent pointer."},
+                        {"name": "Options", "size_bits": None, "description": "Variable-length options tail."},
+                        {"name": "Padding", "size_bits": None, "description": "Derived zero padding."},
+                    ],
+                }
+            )
+        )
+    )
+
+    result = await extractor.extract("tcp-1", "tcp header text", "TCP Header", source_pages=[21, 22, 23, 24])
+
+    assert result.archetype_contribution is not None
+    assert result.archetype_contribution["canonical_hint"] == "tcp_header"
+    assert result.archetype_contribution["tail_slots"][0]["slot_name"] == "options_tail"

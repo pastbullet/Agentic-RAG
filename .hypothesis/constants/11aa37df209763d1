@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/message_archetype.py
+# hypothesis_version: 6.151.9
+
+[0.85, 0.9, 0.95, 100, 106, 107, 108, 109, 110, 111, 112, 128, 144, 160, 'ACK', 'Checksum', 'Data Offset', 'Destination Port', 'FIN', 'Options', 'PSH', 'RST', 'Reserved', 'SYN', 'Sequence Number', 'Source Port', 'URG', 'Urgent Pointer', 'Window', 'ack', 'checksum', 'const', 'data_offset', 'destination_port', 'diagnostics', 'error', 'fin', 'header.data_offset', 'header.reserved', 'header.reserved == 0', 'message_format', 'options_tail', 'psh', 'range_max', 'range_min', 'reserved', 'reserved_zero', 'rst', 'sequence_number', 'source_node_ids', 'source_pages', 'source_port', 'syn', 'tcp header', 'tcp_header', 'urg', 'urgent_pointer', 'warning', 'window']

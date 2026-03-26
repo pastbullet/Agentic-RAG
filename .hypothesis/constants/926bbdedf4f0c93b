@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/message_archetype_models.py
+# hypothesis_version: 6.151.9
+
+['const_reserved_field', 'derived_padding', 'fixed_fields', 'flag_optional_tail', 'length_prefixed_body', 'message_family', 'opaque_bytes', 'opaque_until_tlv_ir', 'packed_header', 'type_dispatched_tail']

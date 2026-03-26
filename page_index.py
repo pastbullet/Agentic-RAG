@@ -655,6 +655,17 @@ def _cleanup_heading_title(raw_title):
     return title
 
 
+def _structure_natural_sort_key(structure):
+    """Sort numbered section identifiers numerically instead of lexicographically."""
+    text = str(structure or "").strip().strip(".")
+    if not text:
+        return (1, ())
+    try:
+        return (0, tuple(int(part) for part in text.split(".")))
+    except ValueError:
+        return (1, (text,))
+
+
 def extract_sub_toc_by_headings(node_page_list, start_index, parent_structure=None, max_lines_per_page=0):
     """
     轻量子目录抽取：扫描每页前若干行的编号标题，不依赖 LLM。
@@ -711,7 +722,7 @@ def extract_sub_toc_by_headings(node_page_list, start_index, parent_structure=No
                 }
             )
 
-    results.sort(key=lambda item: (item["physical_index"], str(item["structure"]).count("."), str(item["structure"])))
+    results.sort(key=lambda item: (item["physical_index"], _structure_natural_sort_key(item["structure"])))
     return results
 
 def process_no_toc(page_list, start_index=1, model=None, logger=None):

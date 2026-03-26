@@ -12,10 +12,11 @@ from jinja2 import Environment, FileSystemLoader
 from src.extract.message_ir import (
     PackedContainerLayout,
     build_packed_containers,
+    codegen_eligible_message_irs,
     lower_protocol_messages_to_message_ir,
-    ready_message_irs,
 )
-from src.extract.rule_dsl import render_rule_expression_as_c
+from src.extract.option_tlv_models import OptionItemIR, OptionListIR, OptionValueFieldIR
+from src.extract.rule_dsl import RuleSyntaxError, render_rule_expression_as_c
 from src.models import CompositeTailIR, FieldIR, MessageIR, NormalizationStatus, ProtocolField, ProtocolMessage, ProtocolSchema, ProtocolStateMachine
 
 
@@ -357,9 +358,291 @@ def _message_to_protocol_message(message_ir: MessageIR) -> ProtocolMessage:
     )
 
 
+def _option_list_lookup(message_ir: MessageIR) -> dict[str, OptionListIR]:
+    return {option_list.list_id: option_list for option_list in message_ir.option_lists}
+
+
+def _option_list_item_enum_symbol(item_enum_name: str, item: OptionItemIR) -> str:
+    return f"{item_enum_name}_{_to_upper_snake(item.kind_name)}"
+
+
+def _option_list_value_c_type(field: OptionValueFieldIR) -> str:
+    if field.width_bits <= 8:
+        return "uint8_t"
+    if field.width_bits <= 16:
+        return "uint16_t"
+    if field.width_bits <= 32:
+        return "uint32_t"
+    return "uint64_t"
+
+
+def _option_list_context(protocol_prefix: str, message_ir: MessageIR, tail: CompositeTailIR, option_list: OptionListIR) -> dict:
+    owner_symbol_prefix = _message_symbol_prefix(protocol_prefix, message_ir)
+    slot_member = _to_lower_snake(tail.name)
+    item_enum_name = f"{owner_symbol_prefix}_{slot_member}_item_kind"
+    item_struct_name = f"{owner_symbol_prefix}_{slot_member}_item"
+    list_struct_name = f"{owner_symbol_prefix}_{slot_member}"
+    value_fields: list[OptionValueFieldIR] = []
+    seen_fields: set[str] = set()
+    for item in option_list.items:
+        for value_field in item.value_fields:
+            if value_field.canonical_name in seen_fields:
+                continue
+            seen_fields.add(value_field.canonical_name)
+            value_fields.append(value_field)
+    max_items = max(1, option_list.max_size_bytes)
+    return {
+        "slot": tail,
+        "tail_kind": "option_list",
+        "option_list": option_list,
+        "slot_member": slot_member,
+        "fixed_prefix_bytes": (tail.fixed_prefix_bits or 0) // 8,
+        "presence_expr": "1",
+        "span_expr": _render_message_expression_as_c(tail.span_expression or "0"),
+        "max_span_bytes": tail.max_span_bytes or option_list.max_size_bytes,
+        "item_enum_name": item_enum_name,
+        "item_struct_name": item_struct_name,
+        "list_struct_name": list_struct_name,
+        "value_fields": value_fields,
+        "items": option_list.items,
+        "validate_helper": f"{owner_symbol_prefix}_{slot_member}_validate",
+        "pack_helper": f"{owner_symbol_prefix}_{slot_member}_pack",
+        "unpack_helper": f"{owner_symbol_prefix}_{slot_member}_unpack",
+        "max_items": max_items,
+    }
+
+
+def _option_list_type_definitions(context: dict) -> list[str]:
+    enum_lines = [f"typedef enum {context['item_enum_name']} {{"]
+    for item in context["items"]:
+        enum_lines.append(
+            f"    {_option_list_item_enum_symbol(context['item_enum_name'], item)} = {item.kind_value},"
+        )
+    enum_lines.append(
+        f"    {context['item_enum_name']}_OPAQUE_REMAINDER = 255"
+    )
+    enum_lines.append(f"}} {context['item_enum_name']};")
+
+    item_struct_lines = [f"typedef struct {context['item_struct_name']} {{"]
+    item_struct_lines.append(f"    {context['item_enum_name']} kind;")
+    for value_field in context["value_fields"]:
+        item_struct_lines.append(
+            f"    {_option_list_value_c_type(value_field)} {_to_lower_snake(value_field.canonical_name)};"
+        )
+    item_struct_lines.append(f"}} {context['item_struct_name']};")
+
+    list_struct_lines = [f"typedef struct {context['list_struct_name']} {{"]
+    list_struct_lines.append(
+        f"    {context['item_struct_name']} items[{context['max_items']}];"
+    )
+    list_struct_lines.append("    size_t item_count;")
+    list_struct_lines.append(
+        f"    uint8_t opaque_remainder[{context['max_span_bytes']}];"
+    )
+    list_struct_lines.append("    size_t opaque_remainder_len;")
+    list_struct_lines.append("    size_t encoded_len;")
+    list_struct_lines.append(f"}} {context['list_struct_name']};")
+    return [
+        "\n".join(enum_lines),
+        "\n".join(item_struct_lines),
+        "\n".join(list_struct_lines),
+    ]
+
+
+def _option_list_helper_definitions(context: dict) -> list[str]:
+    validate_lines = [
+        f"static int {context['validate_helper']}(const {context['list_struct_name']} *list, size_t expected_len) {{",
+        "    size_t cursor = 0;",
+        "    int terminal_seen = 0;",
+        "    if (list == NULL) return -1;",
+        f"    if (list->encoded_len != expected_len) return -1;",
+        f"    if (list->opaque_remainder_len > {context['max_span_bytes']}) return -1;",
+        "    for (size_t index = 0; index < list->item_count; ++index) {",
+        "        const void *item_ptr = &list->items[index];",
+        "        (void)item_ptr;",
+        "        if (terminal_seen) return -1;",
+        "        switch (list->items[index].kind) {",
+    ]
+    for item in context["items"]:
+        enum_symbol = _option_list_item_enum_symbol(context["item_enum_name"], item)
+        validate_lines.append(f"        case {enum_symbol}:")
+        if item.length_model == "singleton":
+            validate_lines.append("            cursor += 1;")
+            if item.is_terminal:
+                validate_lines.append("            terminal_seen = 1;")
+        else:
+            validate_lines.append(f"            cursor += {item.fixed_size_bytes};")
+        validate_lines.append("            break;")
+    validate_lines.extend(
+        [
+            "        default:",
+            "            return -1;",
+            "        }",
+            "    }",
+            "    if (cursor + list->opaque_remainder_len != list->encoded_len) return -1;",
+            f"    if (list->encoded_len > {context['max_span_bytes']}) return -1;",
+            "    return 0;",
+            "}",
+        ]
+    )
+
+    pack_lines = [
+        f"static int {context['pack_helper']}(const {context['list_struct_name']} *list, uint8_t *buf, size_t buf_len) {{",
+        "    size_t cursor = 0;",
+        "    if (list == NULL || buf == NULL) return -1;",
+        f"    if ({context['validate_helper']}(list, list->encoded_len) != 0) return -1;",
+        "    if (buf_len < list->encoded_len) return -1;",
+        "    for (size_t index = 0; index < list->item_count; ++index) {",
+        "        switch (list->items[index].kind) {",
+    ]
+    for item in context["items"]:
+        enum_symbol = _option_list_item_enum_symbol(context["item_enum_name"], item)
+        pack_lines.append(f"        case {enum_symbol}:")
+        if item.kind_value in {0, 1}:
+            pack_lines.extend(
+                [
+                    "            if (cursor + 1 > buf_len) return -1;",
+                    f"            buf[cursor++] = {item.kind_value};",
+                    "            break;",
+                ]
+            )
+        else:
+            pack_lines.extend(
+                [
+                    f"            if (cursor + {item.fixed_size_bytes} > buf_len) return -1;",
+                    f"            buf[cursor] = {item.kind_value};",
+                    f"            buf[cursor + 1] = {item.fixed_size_bytes};",
+                ]
+            )
+            for value_field in item.value_fields:
+                member = _to_lower_snake(value_field.canonical_name)
+                if value_field.width_bits == 8:
+                    pack_lines.append(
+                        f"            buf[cursor + {value_field.byte_offset}] = (uint8_t)list->items[index].{member};"
+                    )
+                elif value_field.width_bits == 16:
+                    pack_lines.append(
+                        f"            buf[cursor + {value_field.byte_offset}] = (uint8_t)((list->items[index].{member} >> 8) & 0xff);"
+                    )
+                    pack_lines.append(
+                        f"            buf[cursor + {value_field.byte_offset + 1}] = (uint8_t)(list->items[index].{member} & 0xff);"
+                    )
+            pack_lines.extend(
+                [
+                    f"            cursor += {item.fixed_size_bytes};",
+                    "            break;",
+                ]
+            )
+    pack_lines.extend(
+        [
+            "        default:",
+            "            return -1;",
+            "        }",
+            "    }",
+            "    if (cursor + list->opaque_remainder_len != list->encoded_len) return -1;",
+            "    if (list->opaque_remainder_len > 0) {",
+            "        memcpy(buf + cursor, list->opaque_remainder, list->opaque_remainder_len);",
+            "    }",
+            "    return (int)list->encoded_len;",
+            "}",
+        ]
+    )
+
+    unpack_lines = [
+        f"static int {context['unpack_helper']}({context['list_struct_name']} *list, const uint8_t *buf, size_t buf_len) {{",
+        "    size_t cursor = 0;",
+        "    if (list == NULL || buf == NULL) return -1;",
+        "    memset(list, 0, sizeof(*list));",
+        "    list->encoded_len = buf_len;",
+        "    while (cursor < buf_len) {",
+        "        uint8_t kind = buf[cursor];",
+        "        if (list->item_count >= sizeof(list->items) / sizeof(list->items[0])) return -1;",
+    ]
+    for index, item in enumerate(context["items"]):
+        prefix = "if" if index == 0 else "else if"
+        enum_symbol = _option_list_item_enum_symbol(context["item_enum_name"], item)
+        unpack_lines.append(f"        {prefix} (kind == {item.kind_value}) {{")
+        if item.length_model == "singleton":
+            unpack_lines.extend(
+                [
+                    f"            list->items[list->item_count].kind = {enum_symbol};",
+                    "            list->item_count += 1;",
+                    "            cursor += 1;",
+                ]
+            )
+            if item.is_terminal:
+                unpack_lines.extend(
+                    [
+                        "            list->opaque_remainder_len = buf_len - cursor;",
+                        "            if (list->opaque_remainder_len > 0) {",
+                        "                memcpy(list->opaque_remainder, buf + cursor, list->opaque_remainder_len);",
+                        "            }",
+                        "            return 0;",
+                    ]
+                )
+            else:
+                unpack_lines.append("            continue;")
+        else:
+            unpack_lines.extend(
+                [
+                    "            uint8_t item_len = 0;",
+                    "            if (cursor + 2 > buf_len) return -1;",
+                    "            item_len = buf[cursor + 1];",
+                    "            if (item_len < 2) return -1;",
+                    f"            if (item_len != {item.fixed_size_bytes}) return -1;",
+                    "            if (cursor + item_len > buf_len) return -1;",
+                    f"            list->items[list->item_count].kind = {enum_symbol};",
+                ]
+            )
+            for value_field in item.value_fields:
+                member = _to_lower_snake(value_field.canonical_name)
+                if value_field.width_bits == 8:
+                    unpack_lines.append(
+                        f"            list->items[list->item_count].{member} = (uint8_t)buf[cursor + {value_field.byte_offset}];"
+                    )
+                elif value_field.width_bits == 16:
+                    unpack_lines.append(
+                        f"            list->items[list->item_count].{member} = (uint16_t)(((uint16_t)buf[cursor + {value_field.byte_offset}] << 8) | (uint16_t)buf[cursor + {value_field.byte_offset + 1}]);"
+                    )
+            unpack_lines.extend(
+                [
+                    "            list->item_count += 1;",
+                    "            cursor += item_len;",
+                    "            continue;",
+                ]
+            )
+        unpack_lines.append("        }")
+    unpack_lines.extend(
+        [
+            "        list->opaque_remainder_len = buf_len - cursor;",
+            "        if (list->opaque_remainder_len > 0) {",
+            "            memcpy(list->opaque_remainder, buf + cursor, list->opaque_remainder_len);",
+            "        }",
+            "        return 0;",
+            "    }",
+            "    return 0;",
+            "}",
+        ]
+    )
+    return [
+        "\n".join(validate_lines),
+        "\n".join(pack_lines),
+        "\n".join(unpack_lines),
+    ]
+
+
 def _message_size_expr(message_ir: MessageIR, prefix: str) -> str:
     if message_ir.composite_tails:
-        total_length_field = message_ir.composite_tails[0].total_length_field
+        tail = message_ir.composite_tails[0]
+        if tail.tail_kind == "opaque_bytes":
+            slot_member = f"{_to_lower_snake(tail.name)}_len"
+            fixed_prefix_bytes = (tail.fixed_prefix_bits or 0) // 8
+            return f"((size_t)({fixed_prefix_bytes} + {prefix}{slot_member}))"
+        if tail.tail_kind == "option_list":
+            slot_member = _to_lower_snake(tail.name)
+            fixed_prefix_bytes = (tail.fixed_prefix_bits or 0) // 8
+            return f"((size_t)({fixed_prefix_bytes} + {prefix}{slot_member}.encoded_len))"
+        total_length_field = tail.total_length_field
         if total_length_field:
             return f"((size_t){_field_ref_to_c(total_length_field, prefix)})"
     if message_ir.total_size_bytes is not None:
@@ -375,6 +658,20 @@ def _message_size_expr(message_ir: MessageIR, prefix: str) -> str:
 def _field_ref_to_c(field_ref: str, prefix: str = "msg->") -> str:
     member = field_ref.split(".")[-1]
     return f"{prefix}{_to_lower_snake(member)}"
+
+
+_EXPR_FIELD_REF_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?\b")
+_EXPR_KEYWORDS = {"sizeof"}
+
+
+def _render_message_expression_as_c(expression: str, prefix: str = "msg->") -> str:
+    def _replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if token in _EXPR_KEYWORDS:
+            return token
+        return _field_ref_to_c(token, prefix)
+
+    return _EXPR_FIELD_REF_RE.sub(_replace, expression)
 
 
 def _storage_type_bits(storage_type: str | None) -> int | None:
@@ -773,6 +1070,7 @@ def _composite_tail_contexts(
     message_ir: MessageIR,
 ) -> list[dict]:
     registry = _candidate_ir_lookup(schema)
+    option_lists_by_id = _option_list_lookup(message_ir)
     contexts: list[dict] = []
     owner_symbol_prefix = _message_symbol_prefix(protocol_prefix, message_ir)
     for tail in message_ir.composite_tails:
@@ -780,8 +1078,44 @@ def _composite_tail_contexts(
         kind_member = f"{_to_lower_snake(tail.name)}_kind"
         slot_member = _to_lower_snake(tail.name)
         fixed_prefix_bytes = (tail.fixed_prefix_bits or 0) // 8
+        presence_expr = "1"
+        if tail.presence_rule_id:
+            rule = next((item for item in message_ir.presence_rules if item.rule_id == tail.presence_rule_id), None)
+            if rule is not None:
+                try:
+                    presence_expr = render_rule_expression_as_c(rule.expression, lambda ref: _field_ref_to_c(ref))
+                except RuleSyntaxError:
+                    presence_expr = "1"
+        span_expr = _render_message_expression_as_c(tail.span_expression or "0")
+        if tail.tail_kind == "option_list":
+            option_list = option_lists_by_id.get(tail.option_list_id or "")
+            if option_list is None:
+                continue
+            context = _option_list_context(protocol_prefix, message_ir, tail, option_list)
+            context["presence_expr"] = presence_expr
+            context["span_expr"] = span_expr
+            contexts.append(context)
+            continue
         candidates = []
         enum_values = [{"name": f"{enum_name}_NONE", "value": 0, "description": "tail absent"}]
+        if tail.tail_kind == "opaque_bytes":
+            contexts.append(
+                {
+                    "slot": tail,
+                    "enum_name": enum_name,
+                    "enum_values": [],
+                    "kind_member": kind_member,
+                    "fixed_prefix_bytes": fixed_prefix_bytes,
+                    "slot_member": slot_member,
+                    "slot_len_member": f"{slot_member}_len",
+                    "presence_expr": presence_expr,
+                    "span_expr": span_expr,
+                    "tail_kind": "opaque_bytes",
+                    "max_span_bytes": tail.max_span_bytes or ((tail.max_span_bits or 0) // 8),
+                    "candidates": [],
+                }
+            )
+            continue
         for index, case in enumerate(tail.dispatch_cases, start=1):
             candidate_ir = registry.get(case.message_ir_id)
             if candidate_ir is None:
@@ -819,6 +1153,10 @@ def _composite_tail_contexts(
                 "kind_member": kind_member,
                 "fixed_prefix_bytes": fixed_prefix_bytes,
                 "slot_member": slot_member,
+                "slot_len_member": f"{slot_member}_len",
+                "presence_expr": presence_expr,
+                "span_expr": span_expr,
+                "tail_kind": "message_family",
                 "candidates": candidates,
             }
         )
@@ -834,6 +1172,28 @@ def _resolve_message_irs(schema: ProtocolSchema) -> list[MessageIR]:
 def _composite_extra_struct_fields(tail_contexts: list[dict]) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     for tail in tail_contexts:
+        if tail["tail_kind"] == "opaque_bytes":
+            entries.append(
+                {
+                    "declaration": f"uint8_t {tail['slot_member']}[{tail['max_span_bytes']}];",
+                    "description": f"opaque bytes for {tail['slot'].name}",
+                }
+            )
+            entries.append(
+                {
+                    "declaration": f"size_t {tail['slot_len_member']};",
+                    "description": f"runtime length for {tail['slot'].name}",
+                }
+            )
+            continue
+        if tail["tail_kind"] == "option_list":
+            entries.append(
+                {
+                    "declaration": f"{tail['list_struct_name']} {tail['slot_member']};",
+                    "description": f"structured option list for {tail['slot'].name}",
+                }
+            )
+            continue
         entries.append(
             {
                 "declaration": f"{tail['enum_name']} {tail['kind_member']};",
@@ -853,6 +1213,8 @@ def _composite_extra_struct_fields(tail_contexts: list[dict]) -> list[dict[str, 
 def _composite_extra_headers(tail_contexts: list[dict]) -> list[str]:
     headers: list[str] = []
     for tail in tail_contexts:
+        if tail["tail_kind"] in {"opaque_bytes", "option_list"}:
+            continue
         for candidate in tail["candidates"]:
             header_name = candidate["header_name"]
             if header_name not in headers:
@@ -861,13 +1223,57 @@ def _composite_extra_headers(tail_contexts: list[dict]) -> list[str]:
 
 
 def _composite_extra_enums(tail_contexts: list[dict]) -> list[dict]:
-    return [{"enum_name": tail["enum_name"], "values": tail["enum_values"]} for tail in tail_contexts]
+    return [
+        {"enum_name": tail["enum_name"], "values": tail["enum_values"]}
+        for tail in tail_contexts
+        if tail["tail_kind"] == "message_family"
+    ]
+
+
+def _composite_extra_type_defs(tail_contexts: list[dict]) -> list[str]:
+    blocks: list[str] = []
+    for tail in tail_contexts:
+        if tail["tail_kind"] == "option_list":
+            blocks.extend(_option_list_type_definitions(tail))
+    return blocks
+
+
+def _composite_helper_definitions(tail_contexts: list[dict]) -> list[str]:
+    blocks: list[str] = []
+    for tail in tail_contexts:
+        if tail["tail_kind"] == "option_list":
+            blocks.extend(_option_list_helper_definitions(tail))
+    return blocks
 
 
 def _composite_validate_statements(tail_contexts: list[dict]) -> list[str]:
     statements: list[str] = []
     for tail in tail_contexts:
         prefix = tail["fixed_prefix_bytes"]
+        if tail["tail_kind"] == "opaque_bytes":
+            presence_expr = tail["presence_expr"]
+            span_expr = tail["span_expr"]
+            len_member = tail["slot_len_member"]
+            max_span_bytes = tail["max_span_bytes"]
+            statements.append(f"if ({presence_expr}) {{")
+            statements.append(f"    if (msg->{len_member} != (size_t)({span_expr})) return -1;")
+            statements.append(f"    if (msg->{len_member} > {max_span_bytes}) return -1;")
+            statements.append("} else {")
+            statements.append(f"    if (msg->{len_member} != 0) return -1;")
+            statements.append("}")
+            continue
+        if tail["tail_kind"] == "option_list":
+            presence_expr = tail["presence_expr"]
+            span_expr = tail["span_expr"]
+            slot_member = tail["slot_member"]
+            statements.append(f"if ({presence_expr}) {{")
+            statements.append(
+                f"    if ({tail['validate_helper']}(&msg->{slot_member}, (size_t)({span_expr})) != 0) return -1;"
+            )
+            statements.append("} else {")
+            statements.append(f"    if ({tail['validate_helper']}(&msg->{slot_member}, 0) != 0) return -1;")
+            statements.append("}")
+            continue
         kind_member = tail["kind_member"]
         none_symbol = f"{tail['enum_name']}_NONE"
         length_field = _field_ref_to_c(tail["slot"].total_length_field)
@@ -894,6 +1300,30 @@ def _composite_pack_steps(tail_contexts: list[dict]) -> list[str]:
     steps: list[str] = []
     for tail in tail_contexts:
         prefix = tail["fixed_prefix_bytes"]
+        if tail["tail_kind"] == "opaque_bytes":
+            presence_expr = tail["presence_expr"]
+            span_expr = tail["span_expr"]
+            len_member = tail["slot_len_member"]
+            slot_member = tail["slot_member"]
+            steps.append(f"if ({presence_expr}) {{")
+            steps.append(f"    if (msg->{len_member} != (size_t)({span_expr})) return -1;")
+            steps.append(f"    memcpy(buf + {prefix}, msg->{slot_member}, msg->{len_member});")
+            steps.append("} else {")
+            steps.append(f"    if (msg->{len_member} != 0) return -1;")
+            steps.append("}")
+            continue
+        if tail["tail_kind"] == "option_list":
+            presence_expr = tail["presence_expr"]
+            span_expr = tail["span_expr"]
+            slot_member = tail["slot_member"]
+            steps.append(f"if ({presence_expr}) {{")
+            steps.append(
+                f"    if ({tail['pack_helper']}(&msg->{slot_member}, buf + {prefix}, buf_len - {prefix}) != (int)({span_expr})) return -1;"
+            )
+            steps.append("} else {")
+            steps.append(f"    if ({tail['pack_helper']}(&msg->{slot_member}, buf + {prefix}, 0) != 0) return -1;")
+            steps.append("}")
+            continue
         kind_member = tail["kind_member"]
         none_symbol = f"{tail['enum_name']}_NONE"
         length_field = _field_ref_to_c(tail["slot"].total_length_field)
@@ -923,6 +1353,39 @@ def _composite_unpack_steps(tail_contexts: list[dict]) -> list[str]:
     steps: list[str] = []
     for tail in tail_contexts:
         prefix = tail["fixed_prefix_bytes"]
+        if tail["tail_kind"] == "opaque_bytes":
+            presence_expr = tail["presence_expr"]
+            span_expr = tail["span_expr"]
+            len_member = tail["slot_len_member"]
+            slot_member = tail["slot_member"]
+            max_span_bytes = tail["max_span_bytes"]
+            steps.append(f"if ({presence_expr}) {{")
+            steps.append(f"    msg->{len_member} = (size_t)({span_expr});")
+            steps.append(f"    if (msg->{len_member} > {max_span_bytes}) return -1;")
+            steps.append(f"    if (buf_len < {prefix} + msg->{len_member}) return -1;")
+            steps.append(f"    memcpy(msg->{slot_member}, buf + {prefix}, msg->{len_member});")
+            steps.append("} else {")
+            steps.append(f"    msg->{len_member} = 0;")
+            steps.append("}")
+            continue
+        if tail["tail_kind"] == "option_list":
+            presence_expr = tail["presence_expr"]
+            span_expr = tail["span_expr"]
+            slot_member = tail["slot_member"]
+            max_span_bytes = tail["max_span_bytes"]
+            steps.append(f"if ({presence_expr}) {{")
+            steps.append(f"    size_t option_list_len = (size_t)({span_expr});")
+            steps.append(f"    if (option_list_len > {max_span_bytes}) return -1;")
+            steps.append(f"    if (buf_len < {prefix} + option_list_len) return -1;")
+            steps.append(
+                f"    if ({tail['unpack_helper']}(&msg->{slot_member}, buf + {prefix}, option_list_len) != 0) return -1;"
+            )
+            steps.append("} else {")
+            steps.append(
+                f"    if ({tail['unpack_helper']}(&msg->{slot_member}, buf + {prefix}, 0) != 0) return -1;"
+            )
+            steps.append("}")
+            continue
         kind_member = tail["kind_member"]
         none_symbol = f"{tail['enum_name']}_NONE"
         length_field = _field_ref_to_c(tail["slot"].total_length_field)
@@ -958,6 +1421,18 @@ def _composite_roundtrip_setup(tail_contexts: list[dict]) -> list[str]:
     lines: list[str] = []
     for tail in tail_contexts:
         prefix = tail["fixed_prefix_bytes"]
+        if tail["tail_kind"] == "opaque_bytes":
+            lines.append("input.data_offset = 5;")
+            lines.append("input.reserved = 0;")
+            lines.append(f"input.{tail['slot_len_member']} = 0;")
+            continue
+        if tail["tail_kind"] == "option_list":
+            lines.append("input.data_offset = 5;")
+            lines.append("input.reserved = 0;")
+            lines.append(f"input.{tail['slot_member']}.encoded_len = 0;")
+            lines.append(f"input.{tail['slot_member']}.item_count = 0;")
+            lines.append(f"input.{tail['slot_member']}.opaque_remainder_len = 0;")
+            continue
         kind_member = tail["kind_member"]
         none_symbol = f"{tail['enum_name']}_NONE"
         lines.append(f"input.auth_present = 0;")
@@ -969,6 +1444,47 @@ def _composite_roundtrip_setup(tail_contexts: list[dict]) -> list[str]:
 def _composite_roundtrip_assertions(tail_contexts: list[dict]) -> list[str]:
     assertions: list[str] = []
     for tail in tail_contexts:
+        if tail["tail_kind"] == "opaque_bytes":
+            assertions.append(f"if (decoded.{tail['slot_len_member']} != input.{tail['slot_len_member']}) return 1;")
+            assertions.append(
+                f"if (memcmp(decoded.{tail['slot_member']}, input.{tail['slot_member']}, input.{tail['slot_len_member']}) != 0) return 1;"
+            )
+            continue
+        if tail["tail_kind"] == "option_list":
+            assertions.append(
+                f"if (decoded.{tail['slot_member']}.encoded_len != input.{tail['slot_member']}.encoded_len) return 1;"
+            )
+            assertions.append(
+                f"if (decoded.{tail['slot_member']}.item_count != input.{tail['slot_member']}.item_count) return 1;"
+            )
+            assertions.append(
+                f"if (decoded.{tail['slot_member']}.opaque_remainder_len != input.{tail['slot_member']}.opaque_remainder_len) return 1;"
+            )
+            assertions.append(
+                f"for (size_t index = 0; index < input.{tail['slot_member']}.item_count; ++index) {{"
+            )
+            assertions.append(
+                f"    if (decoded.{tail['slot_member']}.items[index].kind != input.{tail['slot_member']}.items[index].kind) return 1;"
+            )
+            assertions.append("    switch (input.{0}.items[index].kind) {{".format(tail["slot_member"]))
+            for item in tail["items"]:
+                enum_symbol = _option_list_item_enum_symbol(tail["item_enum_name"], item)
+                assertions.append(f"    case {enum_symbol}: {{")
+                for value_field in item.value_fields:
+                    member = _to_lower_snake(value_field.canonical_name)
+                    assertions.append(
+                        f"        if (decoded.{tail['slot_member']}.items[index].{member} != input.{tail['slot_member']}.items[index].{member}) return 1;"
+                    )
+                assertions.append("        break;")
+                assertions.append("    }")
+            assertions.append("    default:")
+            assertions.append("        break;")
+            assertions.append("    }")
+            assertions.append("}")
+            assertions.append(
+                f"if (decoded.{tail['slot_member']}.opaque_remainder_len > 0 && memcmp(decoded.{tail['slot_member']}.opaque_remainder, input.{tail['slot_member']}.opaque_remainder, input.{tail['slot_member']}.opaque_remainder_len) != 0) return 1;"
+            )
+            continue
         assertions.append(f"if (decoded.{tail['kind_member']} != input.{tail['kind_member']}) return 1;")
     return assertions
 
@@ -995,6 +1511,8 @@ def _build_message_ir_context(
     fixed_prefix_candidates = [value for value in (variable_prefix_bytes, composite_prefix_bytes) if value is not None]
     fixed_prefix_bytes = min(fixed_prefix_candidates) if fixed_prefix_candidates else None
     extra_headers = _composite_extra_headers(tail_contexts)
+    extra_type_defs = _composite_extra_type_defs(tail_contexts)
+    extra_helper_definitions = _composite_helper_definitions(tail_contexts)
     enum_domains = _enum_contexts(message_ir, symbol_prefix) + _composite_extra_enums(tail_contexts)
     roundtrip_setup = [line for field in ordered_fields for line in _sample_value_assignment(field, message_ir)]
     roundtrip_setup.extend(_composite_roundtrip_setup(tail_contexts))
@@ -1007,8 +1525,10 @@ def _build_message_ir_context(
         "unpack_function": f"{symbol_prefix}_unpack",
         "validate_function": f"{symbol_prefix}_validate",
         "extra_headers": extra_headers,
+        "extra_type_defs": extra_type_defs,
         "struct_fields": struct_fields,
         "enum_domains": enum_domains,
+        "extra_helper_definitions": extra_helper_definitions,
         "pack_steps": _pack_steps(message_ir) + _composite_pack_steps(tail_contexts),
         "unpack_steps": _unpack_steps(message_ir) + _composite_unpack_steps(tail_contexts),
         "validate_checks": _validation_checks(message_ir),
@@ -1038,12 +1558,12 @@ def _build_message_context(
     message_ir = message if isinstance(message, MessageIR) else None
     if message_ir is None:
         lowered = lower_protocol_messages_to_message_ir(schema.protocol_name, [message])
-        ready = ready_message_irs(lowered)
-        if not ready:
-            raise ValueError(f"Message {message.name} is not READY for MessageIR codegen")
-        message_ir = ready[0]
-    if message_ir.normalization_status != NormalizationStatus.READY:
-        raise ValueError(f"Message {message_ir.display_name} is not READY for MessageIR codegen")
+        eligible = codegen_eligible_message_irs(lowered)
+        if not eligible:
+            raise ValueError(f"Message {message.name} is not codegen-eligible for MessageIR codegen")
+        message_ir = eligible[0]
+    if message_ir.normalization_status not in {NormalizationStatus.READY, NormalizationStatus.DEGRADED_READY}:
+        raise ValueError(f"Message {message_ir.display_name} is not codegen-eligible for MessageIR codegen")
     return _build_message_ir_context(protocol_prefix, schema, message_ir, header_name)
 
 
@@ -1108,9 +1628,9 @@ def generate_code(schema: ProtocolSchema, output_dir: str) -> CodegenResult:
             )
 
     resolved_message_irs = _resolve_message_irs(sorted_schema)
-    ready_irs = ready_message_irs(resolved_message_irs)
+    eligible_irs = codegen_eligible_message_irs(resolved_message_irs)
     for message_ir in resolved_message_irs:
-        if message_ir.normalization_status == NormalizationStatus.READY:
+        if message_ir.normalization_status in {NormalizationStatus.READY, NormalizationStatus.DEGRADED_READY}:
             continue
         diagnostic_text = "; ".join(f"{diag.code}: {diag.message}" for diag in message_ir.diagnostics) or "not READY"
         result.warnings.append(f"{message_ir.display_name}: {diagnostic_text}")
@@ -1122,7 +1642,7 @@ def generate_code(schema: ProtocolSchema, output_dir: str) -> CodegenResult:
             }
         )
 
-    for message_ir in ready_irs:
+    for message_ir in eligible_irs:
         try:
             header_name = _header_name_for_message(protocol_prefix, message_ir)
             source_name = _source_name_for_message(protocol_prefix, message_ir)

@@ -94,6 +94,7 @@ ANTHROPIC_BASE_URL=...           # 可选
 ANTHROPIC_MODEL_NAME=claude-sonnet-4-20250514
 
 # 通用
+PROTOCOL_TWIN_MODEL=gpt-4o       # 推荐：统一给 extraction / QA 指定默认模型
 PROTOCOL_TWIN_LLM_TIMEOUT_SEC=120
 ```
 
@@ -129,6 +130,53 @@ python -m src.main \
   --pdf data/raw/FC-LS.pdf \
   --query "FLOGI 的关键字段有哪些？"
 ```
+
+### 5.4 运行协议提取 / MessageIR 流水线
+
+仓库根目录提供了一个独立 runner：[run_extract_pipeline.py](./run_extract_pipeline.py)。
+
+它会自动读取 `.env`，因此通常**不需要显式传 `--model`**。模型解析顺序为：
+- `PROTOCOL_TWIN_MODEL`
+- `OPENAI_MODEL_NAME` / `ANTHROPIC_MODEL_NAME`
+- `config.yaml`
+- 代码默认值
+
+先把新 PDF 处理到可提取状态，并运行到 `MERGE`：
+
+```bash
+python run_extract_pipeline.py \
+  --pdf data/raw/rfc793-TCP.pdf \
+  --stages process,classify,extract,merge \
+  --show-message-irs
+```
+
+如果 `message_ir` 里已经出现 `READY` 的对象，再继续跑 codegen/verify：
+
+```bash
+python run_extract_pipeline.py \
+  --doc rfc793-TCP.pdf \
+  --stages codegen,verify \
+  --show-message-irs
+```
+
+如果你要整条链一次跑完：
+
+```bash
+python run_extract_pipeline.py \
+  --pdf data/raw/rfc793-TCP.pdf \
+  --stages all \
+  --show-message-irs
+```
+
+建议的测试顺序：
+- 先跑 `process,classify,extract,merge`
+- 观察 `data/out/<doc_stem>/message_ir.json`
+- 只有在出现 `READY` MessageIR 后，再跑 `codegen,verify`
+
+runner 会输出：
+- 每个 stage 的成功/失败状态
+- merge 后的 `message_ir_count` / `ready_message_ir_count`
+- `MessageIR` 的 `READY/BLOCKED` 摘要与 diagnostics
 
 ---
 

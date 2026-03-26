@@ -10,6 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from src.extract.option_tlv_models import OptionListIR
+
 
 # ── 核心模型 ──────────────────────────────────────────────
 
@@ -135,11 +137,13 @@ class ProtocolMessage(BaseModel):
     name: str
     fields: list[ProtocolField] = []
     source_pages: list[int] = []
+    archetype_contribution: dict | None = None
 
 
 class NormalizationStatus(str, Enum):
     DRAFT = "draft"
     READY = "ready"
+    DEGRADED_READY = "degraded_ready"
     BLOCKED = "blocked"
 
 
@@ -206,6 +210,7 @@ class SectionIR(BaseModel):
     optional: bool = False
     presence_rule_ids: list[str] = []
     field_ids: list[str] = []
+    option_list_id: str | None = None
     source_pages: list[int] = []
 
 
@@ -220,14 +225,19 @@ class CompositeTailIR(BaseModel):
     slot_id: str
     section_id: str
     name: str
+    tail_kind: str = "message_family"
     optional: bool = False
     presence_rule_id: str | None = None
     selector_field: str | None = None
     total_length_field: str | None = None
+    span_expression: str | None = None
     fixed_prefix_bits: int | None = None
     start_bit_offset: int | None = None
     min_span_bits: int | None = None
     max_span_bits: int | None = None
+    max_span_bytes: int | None = None
+    fallback_mode: str | None = None
+    option_list_id: str | None = None
     candidate_message_irs: list[str] = []
     dispatch_cases: list[CompositeDispatchCaseIR] = []
 
@@ -276,6 +286,7 @@ class MessageIR(BaseModel):
     max_size_bits: int | None = None
     sections: list[SectionIR] = []
     composite_tails: list[CompositeTailIR] = []
+    option_lists: list[OptionListIR] = []
     fields: list[FieldIR] = []
     normalized_field_order: list[str] = []
     presence_rules: list[PresenceRule] = []
@@ -284,6 +295,67 @@ class MessageIR(BaseModel):
     codegen_hints: CodegenHints = CodegenHints(preferred_template="message_ir_v1")
     diagnostics: list[IRDiagnostic] = []
     normalization_status: NormalizationStatus = NormalizationStatus.DRAFT
+
+
+class ContextFieldIR(BaseModel):
+    field_id: str
+    name: str
+    canonical_name: str
+    type_kind: str = "opaque"
+    width_bits: int | None = None
+    semantic_role: str | None = None
+    initial_value_kind: str | None = None
+    initial_value_expr: str | None = None
+    read_only: bool = False
+    optional: bool = False
+    read_by: list[str] = []
+    written_by: list[str] = []
+    diagnostics: list[IRDiagnostic] = []
+
+
+class ContextTimerIR(BaseModel):
+    timer_id: str
+    name: str
+    canonical_name: str
+    semantic_role: str | None = None
+    duration_source_kind: str | None = None
+    duration_expr: str | None = None
+    triggers_event: str | None = None
+    start_actions: list[str] = []
+    cancel_actions: list[str] = []
+    diagnostics: list[IRDiagnostic] = []
+
+
+class ContextResourceIR(BaseModel):
+    resource_id: str
+    name: str
+    canonical_name: str
+    kind: str = "opaque_handle"
+    semantic_role: str | None = None
+    element_kind: str | None = None
+    diagnostics: list[IRDiagnostic] = []
+
+
+class ContextRuleIR(BaseModel):
+    rule_id: str
+    kind: str
+    expression: str
+    depends_on_fields: list[str] = []
+    diagnostics: list[IRDiagnostic] = []
+
+
+class StateContextIR(BaseModel):
+    context_id: str
+    name: str
+    canonical_name: str
+    scope: str = "global"
+    state_field: str | None = None
+    fields: list[ContextFieldIR] = []
+    timers: list[ContextTimerIR] = []
+    resources: list[ContextResourceIR] = []
+    invariants: list[ContextRuleIR] = []
+    diagnostics: list[IRDiagnostic] = []
+    readiness: NormalizationStatus = NormalizationStatus.DRAFT
 
 
 class ProcedureStep(BaseModel):
@@ -318,6 +390,7 @@ class ProtocolSchema(BaseModel):
 
     protocol_name: str
     state_machines: list[ProtocolStateMachine] = []
+    state_contexts: list[StateContextIR] = []
     messages: list[ProtocolMessage] = []
     message_irs: list[MessageIR] = []
     procedures: list[ProcedureRule] = []

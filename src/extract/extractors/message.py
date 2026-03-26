@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 
+from src.extract.message_archetype import build_message_archetype_contribution_from_message
 from src.models import ProtocolField, ProtocolMessage
 
 from .base import BaseExtractor
@@ -76,6 +77,7 @@ def _post_process_message(message: ProtocolMessage) -> ProtocolMessage:
         name=message.name,
         fields=normalized_fields,
         source_pages=list(message.source_pages),
+        archetype_contribution=message.archetype_contribution,
     )
 
 
@@ -101,7 +103,14 @@ class MessageExtractor(BaseExtractor):
             )
             if "source_pages" not in payload:
                 payload["source_pages"] = pages
-            return _post_process_message(ProtocolMessage.model_validate(payload))
+            message = _post_process_message(ProtocolMessage.model_validate(payload))
+            archetype = build_message_archetype_contribution_from_message(message, source_node_ids=[node_id])
+            if archetype is not None and message.archetype_contribution is None:
+                message = message.model_copy(
+                    update={"archetype_contribution": archetype.model_dump()},
+                    deep=True,
+                )
+            return message
         except Exception as exc:
             logger.warning("Message extraction failed for %s: %s", node_id, exc)
             return ProtocolMessage(name=title or node_id, source_pages=pages)

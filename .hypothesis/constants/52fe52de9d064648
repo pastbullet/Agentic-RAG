@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/sm_similarity.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.3, 0.35, 0.4, 0.5, 0.6, 0.65, 0.75, 1.0, 'A', 'B', 'C', '[a-z0-9]+', '\\s+', 'a', 'admin', 'administrative', 'an', 'and', 'async', 'asynchronous', 'been', 'bfd', 'diff', 'event', 'expire', 'expired', 'expires', 'extract', 'for', 'had', 'has', 'have', 'if', 'in', 'is', 'its', 'keep_separate', 'left', 'merge', 'name', 'names', 'none', 'of', 'on', 'or', 'packet', 'packets', 'pair', 'poll', 'pollsequence', 'receive', 'received', 'receiving', 'right', 'scores', 'session', 'state', 'states', 'states_only_left', 'states_only_right', 'that', 'the', 'then', 'this', 'time', 'to', 'transitions', 'unmet_constraints', 'was', 'weighted_score', 'were', 'when', 'with']

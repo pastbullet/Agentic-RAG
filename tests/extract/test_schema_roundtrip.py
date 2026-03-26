@@ -21,6 +21,7 @@ from src.models import (
     ProtocolTransition,
     TimerConfig,
 )
+from src.extract.state_context import build_generic_session_state_context, build_tcp_connection_state_context
 
 
 state_st = st.builds(
@@ -94,10 +95,18 @@ error_st = st.builds(
     source_pages=st.lists(st.integers(min_value=1, max_value=500), max_size=10),
 )
 
+state_context_st = st.sampled_from(
+    [
+        build_tcp_connection_state_context(),
+        build_generic_session_state_context(),
+    ]
+)
+
 schema_st = st.builds(
     ProtocolSchema,
     protocol_name=st.text(min_size=1, max_size=60),
     state_machines=st.lists(state_machine_st, max_size=4),
+    state_contexts=st.lists(state_context_st, max_size=4),
     messages=st.lists(message_st, max_size=4),
     procedures=st.lists(procedure_st, max_size=4),
     timers=st.lists(timer_st, max_size=4),

@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/evidence_card.py
+# hypothesis_version: 6.151.9
+
+[0.0, 1.0, 4000, '\\S+', '```', 'content', 'decision', 'decisions', 'diff', 'empty LLM response', 'extract', 'fallback', 'fallback_without_llm', 'fields_only_left', 'fields_only_right', 'final_decision', 'json', 'keep_separate', 'left', 'merge', 'message', 'message_near_misses', 'names', 'object_type', 'pair', 'pair_id', 'right', 'role', 'should_merge', 'source_pages', 'state_machine', 'states_only_left', 'states_only_right', 'system', 'text', 'user', 'utf-8', 'verdict', '{', '}']

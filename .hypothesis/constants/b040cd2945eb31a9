@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/extractors/message.py
+# hypothesis_version: 6.151.9
+
+['echo', 'extract', 'password', 'source_pages']

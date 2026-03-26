@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/message_archetype_lowering.py
+# hypothesis_version: 6.151.9
+
+['Header', '_', 'error', 'field', 'header', 'message_ir_v1', 'opaque_tail', 'opaque_tail_lowered', 'option_list', 'option_list_tail', 'optional_tail', 'options_tail', 'pack', 'packed_header', 'reserved_zero', 'section', 'tcp_header', 'unpack', 'validate', 'warning']

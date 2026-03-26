@@ -1007,6 +1007,7 @@ def _merge_section(draft: _DraftState, contribution: SectionContribution) -> Non
                 optional=contribution.optional,
                 presence_rule_ids=list(contribution.presence_rule_ids),
                 field_ids=list(contribution.field_ids),
+                option_list_id=None,
                 source_pages=list(contribution.source_pages),
             )
         )
@@ -1094,6 +1095,7 @@ def _merge_composite_tails(existing: list[CompositeTailIR], additions: list[Comp
             by_id[tail.slot_id] = existing[-1]
             continue
         current = by_id[tail.slot_id]
+        current.option_list_id = current.option_list_id or tail.option_list_id
         current.candidate_message_irs = _ordered_union(current.candidate_message_irs + tail.candidate_message_irs)
         existing_cases = {case.case_id: case for case in current.dispatch_cases}
         for case in tail.dispatch_cases:
@@ -1450,9 +1452,11 @@ def normalize_message_ir(
             section.resolved_byte_offset = section_start // 8
             section.resolved_bit_width = section_end - section_start
 
+    has_degraded_tail = False
     if normalized.composite_tails:
         sections_by_id = {section.section_id: section for section in normalized.sections}
         presence_by_id = {rule.rule_id: rule for rule in normalized.presence_rules}
+        option_lists_by_id = {option_list.list_id: option_list for option_list in normalized.option_lists}
         available = available_message_irs or {}
         for tail in normalized.composite_tails:
             if tail.presence_rule_id and tail.presence_rule_id not in presence_by_id:
@@ -1493,6 +1497,68 @@ def normalize_message_ir(
                 section.resolved_bit_offset = tail.start_bit_offset
                 section.resolved_byte_offset = tail.start_bit_offset // 8
                 section.optional = True
+            if tail.tail_kind == "opaque_bytes":
+                has_degraded_tail = True
+                if not tail.span_expression:
+                    normalized.diagnostics.append(
+                        _make_diag(
+                            "error",
+                            "missing_tail_span_expression",
+                            f"Opaque tail {tail.slot_id} is missing span metadata.",
+                            source_pages=normalized.source_pages,
+                            source_node_ids=normalized.source_node_ids,
+                        )
+                    )
+                if tail.max_span_bits is None and tail.max_span_bytes is not None:
+                    tail.max_span_bits = tail.max_span_bytes * 8
+                if tail.min_span_bits is None:
+                    tail.min_span_bits = 0
+                if tail.max_span_bits is None:
+                    normalized.diagnostics.append(
+                        _make_diag(
+                            "error",
+                            "unknown_tail_span",
+                            f"Opaque tail {tail.slot_id} could not derive any span bounds.",
+                            source_pages=normalized.source_pages,
+                            source_node_ids=normalized.source_node_ids,
+                        )
+                    )
+                if section is not None and tail.max_span_bits is not None:
+                    section.resolved_bit_width = tail.max_span_bits
+                continue
+            if tail.tail_kind == "option_list":
+                option_list = option_lists_by_id.get(tail.option_list_id or "")
+                if option_list is None:
+                    normalized.diagnostics.append(
+                        _make_diag(
+                            "error",
+                            "missing_option_list_binding",
+                            f"Composite tail {tail.slot_id} is missing its bound option list.",
+                            source_pages=normalized.source_pages,
+                            source_node_ids=normalized.source_node_ids,
+                        )
+                    )
+                    continue
+                has_degraded_tail = has_degraded_tail or bool(option_list.fallback_triggered)
+                if not tail.span_expression:
+                    normalized.diagnostics.append(
+                        _make_diag(
+                            "error",
+                            "missing_tail_span_expression",
+                            f"Option-list tail {tail.slot_id} is missing span metadata.",
+                            source_pages=normalized.source_pages,
+                            source_node_ids=normalized.source_node_ids,
+                        )
+                    )
+                if tail.max_span_bits is None and tail.max_span_bytes is not None:
+                    tail.max_span_bits = tail.max_span_bytes * 8
+                if tail.max_span_bits is None:
+                    tail.max_span_bits = option_list.max_size_bytes * 8
+                if tail.min_span_bits is None:
+                    tail.min_span_bits = option_list.min_size_bytes * 8
+                if section is not None and tail.max_span_bits is not None:
+                    section.resolved_bit_width = tail.max_span_bits
+                continue
             ready_candidates: list[MessageIR] = []
             for candidate_id in tail.candidate_message_irs:
                 candidate = available.get(candidate_id)
@@ -1607,7 +1673,7 @@ def normalize_message_ir(
             (normalized.total_size_bits + 7) // 8 if normalized.total_size_bits is not None else None
         )
     else:
-        if max_total_bits > 0:
+        if max_total_bits > 0 and not normalized.composite_tails and not any(field.is_variable_length for field in ordered_fields):
             normalized.total_size_bits = max_total_bits
             normalized.total_size_bytes = (max_total_bits + 7) // 8
 
@@ -1651,17 +1717,41 @@ def normalize_message_ir(
         if any(field.optional for field in ordered_fields) and not normalized.presence_rules:
             ready = False
     if normalized.composite_tails:
+        option_lists_by_id = {option_list.list_id: option_list for option_list in normalized.option_lists}
         for tail in normalized.composite_tails:
-            if not tail.presence_rule_id or not tail.selector_field or not tail.total_length_field:
-                ready = False
             if tail.start_bit_offset is None:
-                ready = False
-            if not tail.candidate_message_irs or not tail.dispatch_cases:
                 ready = False
             if tail.min_span_bits is None and tail.max_span_bits is None:
                 ready = False
+            if tail.tail_kind == "opaque_bytes":
+                if not tail.presence_rule_id or not tail.span_expression or tail.max_span_bytes is None:
+                    ready = False
+                continue
+            if tail.tail_kind == "option_list":
+                option_list = option_lists_by_id.get(tail.option_list_id or "")
+                if option_list is None:
+                    ready = False
+                    continue
+                if (
+                    not tail.presence_rule_id
+                    or not tail.span_expression
+                    or tail.max_span_bytes is None
+                    or not tail.option_list_id
+                    or not option_list.items
+                ):
+                    ready = False
+                continue
+            if not tail.presence_rule_id or not tail.selector_field or not tail.total_length_field:
+                ready = False
+            if not tail.candidate_message_irs or not tail.dispatch_cases:
+                ready = False
 
-    normalized.normalization_status = NormalizationStatus.READY if ready else NormalizationStatus.BLOCKED
+    if ready:
+        normalized.normalization_status = (
+            NormalizationStatus.DEGRADED_READY if has_degraded_tail else NormalizationStatus.READY
+        )
+    else:
+        normalized.normalization_status = NormalizationStatus.BLOCKED
     return normalized
 
 
@@ -1670,9 +1760,41 @@ def lower_protocol_messages_to_message_ir(
     messages: list[ProtocolMessage],
     extraction_records: list[ExtractionRecord] | None = None,
 ) -> list[MessageIR]:
-    registry = build_message_ir_registry(protocol_name, messages, extraction_records)
-    return [registry[key] for key in sorted(registry)]
+    from src.extract.message_archetype import build_message_archetype_contributions
+    from src.extract.message_archetype_lowering import lower_archetype_contributions_to_message_irs
+
+    archetype_contributions = build_message_archetype_contributions(
+        protocol_name,
+        messages,
+        extraction_records=extraction_records,
+    )
+    handled_keys = {contribution.canonical_hint for contribution in archetype_contributions}
+
+    legacy_messages = [
+        message
+        for message in messages
+        if _canonical_identity_for_message(message.name) not in handled_keys
+    ]
+    legacy_records: list[ExtractionRecord] = []
+    for record in extraction_records or []:
+        message = _message_from_record(record)
+        if message is not None and _canonical_identity_for_message(message.name) in handled_keys:
+            continue
+        legacy_records.append(record)
+
+    registry = build_message_ir_registry(protocol_name, legacy_messages, legacy_records)
+    lowered_archetypes = lower_archetype_contributions_to_message_irs(protocol_name, archetype_contributions)
+    combined = [registry[key] for key in sorted(registry)] + lowered_archetypes
+    return sorted(combined, key=lambda item: item.canonical_name)
 
 
 def ready_message_irs(message_irs: list[MessageIR]) -> list[MessageIR]:
     return [message_ir for message_ir in message_irs if message_ir.normalization_status == NormalizationStatus.READY]
+
+
+def codegen_eligible_message_irs(message_irs: list[MessageIR]) -> list[MessageIR]:
+    return [
+        message_ir
+        for message_ir in message_irs
+        if message_ir.normalization_status in {NormalizationStatus.READY, NormalizationStatus.DEGRADED_READY}
+    ]

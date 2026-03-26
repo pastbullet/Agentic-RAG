@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/rule_dsl.py
+# hypothesis_version: 6.151.9
+
+[' && ', ' + ', ' || ', '!=', '(', ')', '<', '<=', '==', '>', '>=', 'AND', 'ARROW', 'COMMA', 'EQ', 'Expr', 'Expression is empty', 'GE', 'GT', 'IDENT', 'IN', 'LBRACE', 'LE', 'LT', 'MISMATCH', 'NE', 'NUMBER', 'PLUS', 'RBRACE', 'SPACE', 'and', 'in']

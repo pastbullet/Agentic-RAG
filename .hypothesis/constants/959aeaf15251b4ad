@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/option_tlv.py
+# hypothesis_version: 6.151.9
+
+['End of option list', 'MSS Value', 'Maximum Segment Size', 'No operation', 'Shift Count', 'TCP Options', 'Window Scale', 'big', 'eol', 'error', 'fixed_fields', 'kind_length_value', 'mss', 'mss_value', 'nop', 'opaque_remainder', 'option_out_of_bounds', 'shift_count', 'singleton', 'tcp_option', 'tcp_options', 'unknown_option_kind', 'unused_after_eol', 'warning', 'window_scale']

@@ -20,6 +20,10 @@ typedef enum {{ enum_domain["enum_name"] }} {
 } {{ enum_domain["enum_name"] }};
 
 {% endfor -%}
+{% for block in extra_type_defs -%}
+{{ block }}
+
+{% endfor -%}
 typedef struct {{ struct_name }} {
 {% for field in struct_fields -%}
     {{ field.declaration }}{% if field.description %} /* {{ field.description }} */{% endif %}
