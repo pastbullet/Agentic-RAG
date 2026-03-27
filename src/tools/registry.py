@@ -22,14 +22,16 @@ class DocConfig(TypedDict, total=False):
 # Built-in registry entries (kept for backward compatibility)
 DOC_REGISTRY: dict[str, DocConfig] = {
     "FC-LS.pdf": {
-        "chunks_dir": "data/out/chunks_3/FC-LS",
-        "content_dir": "output/json",
+        "chunks_dir": "data/out/chunks/FC-LS",
+        "content_dir": "data/out/content/FC-LS/json",
         "total_pages": 210,
+        "pdf_path": "data/raw/FC-LS.pdf",
     },
     "rfc5880-BFD.pdf": {
-        "chunks_dir": "data/out/chunks_3/BFD",
-        "content_dir": "output_bfd/json",
+        "chunks_dir": "data/out/chunk/rfc5880-BFD",
+        "content_dir": "data/out/content/rfc5880-BFD/json",
         "total_pages": 49,
+        "pdf_path": "data/raw/rfc5880-BFD.pdf",
     },
 }
 
