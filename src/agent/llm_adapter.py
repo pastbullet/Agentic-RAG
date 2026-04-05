@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -103,6 +104,19 @@ class LLMAdapter:
     async def _chat_openai(
         self, messages: list[dict], tools: list[dict]
     ) -> LLMResponse:
+        if self._should_use_structured_output(messages, tools):
+            return await self._chat_openai_structured(messages)
+
+        return await self._chat_openai_once(messages, tools)
+
+    async def _chat_openai_once(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        response_format: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | str | None = None,
+    ) -> LLMResponse:
         client = self._get_openai_client()
 
         kwargs: dict = {
@@ -111,8 +125,13 @@ class LLMAdapter:
         }
         if tools:
             kwargs["tools"] = tools
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
 
         response = await client.chat.completions.create(**kwargs)
+        self._validate_openai_response_shape(response)
         choice = response.choices[0]
         msg = choice.message
 
@@ -165,6 +184,68 @@ class LLMAdapter:
             usage=usage,
             raw_message=raw,
         )
+
+    async def _chat_openai_structured(
+        self,
+        messages: list[dict],
+    ) -> LLMResponse:
+        schema = self._structured_output_schema(messages)
+        last_error: Exception | None = None
+
+        if schema is not None:
+            synthetic_tools = [self._structured_output_tool_schema(schema)]
+            try:
+                tool_response = await self._chat_openai_once(
+                    messages,
+                    synthetic_tools,
+                    tool_choice={
+                        "type": "function",
+                        "function": {"name": self._structured_output_tool_name()},
+                    },
+                )
+                normalized = self._normalize_structured_tool_response(tool_response)
+                if normalized is not None:
+                    return normalized
+                if self._response_text_is_json_object(tool_response):
+                    return tool_response
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+
+            try:
+                schema_response = await self._chat_openai_once(
+                    messages,
+                    [],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "structured_output",
+                            "strict": True,
+                            "schema": schema,
+                        },
+                    },
+                )
+                if self._response_text_is_json_object(schema_response):
+                    return schema_response
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+
+        try:
+            json_object_response = await self._chat_openai_once(
+                messages,
+                [],
+                response_format={"type": "json_object"},
+            )
+            if self._response_text_is_json_object(json_object_response):
+                return json_object_response
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+
+        try:
+            return await self._chat_openai_once(messages, [])
+        except Exception:
+            if last_error is not None:
+                raise last_error
+            raise
 
     # ── Anthropic implementation ──────────────────────────
 
@@ -246,6 +327,142 @@ class LLMAdapter:
             else:
                 rest.append(msg)
         return "\n".join(system_parts), rest
+
+    @staticmethod
+    def _should_request_json_object(messages: list[dict], tools: list[dict]) -> bool:
+        """Backward-compatible alias for tests and legacy callers."""
+        return LLMAdapter._should_use_structured_output(messages, tools)
+
+    @staticmethod
+    def _should_use_structured_output(messages: list[dict], tools: list[dict]) -> bool:
+        """Use structured-output enforcement for plain JSON-only prompts."""
+        if tools:
+            return False
+        for msg in messages:
+            if msg.get("role") != "system":
+                continue
+            content = str(msg.get("content", ""))
+            if "Return JSON only" in content or "Return JSON only with this schema" in content:
+                return True
+        return False
+
+    @staticmethod
+    def _extract_first_json_object(text: str) -> dict[str, Any] | None:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(text):
+            if char != "{":
+                continue
+            try:
+                payload, _ = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        return None
+
+    @staticmethod
+    def _infer_json_schema_from_example(value: Any) -> dict[str, Any]:
+        if isinstance(value, bool):
+            return {"type": "boolean"}
+        if isinstance(value, int) and not isinstance(value, bool):
+            return {"type": "integer"}
+        if isinstance(value, float):
+            return {"type": "number"}
+        if isinstance(value, str):
+            return {"type": "string"}
+        if value is None:
+            return {"type": "null"}
+        if isinstance(value, list):
+            item_schema = (
+                LLMAdapter._infer_json_schema_from_example(value[0])
+                if value else
+                {}
+            )
+            return {"type": "array", "items": item_schema}
+        if isinstance(value, dict):
+            properties = {
+                key: LLMAdapter._infer_json_schema_from_example(item)
+                for key, item in value.items()
+            }
+            return {
+                "type": "object",
+                "properties": properties,
+                "required": list(value.keys()),
+                "additionalProperties": False,
+            }
+        return {}
+
+    @classmethod
+    def _structured_output_schema(cls, messages: list[dict]) -> dict[str, Any] | None:
+        for msg in messages:
+            if msg.get("role") != "system":
+                continue
+            content = str(msg.get("content", ""))
+            example = cls._extract_first_json_object(content)
+            if isinstance(example, dict):
+                return cls._infer_json_schema_from_example(example)
+        return {
+            "type": "object",
+            "additionalProperties": True,
+        }
+
+    @staticmethod
+    def _structured_output_tool_name() -> str:
+        return "emit_structured_response"
+
+    @classmethod
+    def _structured_output_tool_schema(cls, schema: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": cls._structured_output_tool_name(),
+                "description": "Return the structured JSON response exactly once.",
+                "parameters": schema,
+            },
+        }
+
+    @classmethod
+    def _normalize_structured_tool_response(cls, response: LLMResponse) -> LLMResponse | None:
+        if not response.tool_calls:
+            return None
+        first_call = response.tool_calls[0]
+        if first_call.name != cls._structured_output_tool_name():
+            return None
+        if not isinstance(first_call.arguments, dict):
+            return None
+        return LLMResponse(
+            has_tool_calls=False,
+            tool_calls=[],
+            text=json.dumps(first_call.arguments, ensure_ascii=False),
+            usage=response.usage,
+            raw_message=response.raw_message,
+        )
+
+    @staticmethod
+    def _response_text_is_json_object(response: LLMResponse) -> bool:
+        text = (response.text or "").strip()
+        if not text:
+            return False
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(payload, dict)
+
+    @staticmethod
+    def _validate_openai_response_shape(response) -> None:
+        """Fail clearly when a gateway returns HTML/plain text instead of ChatCompletion."""
+        choices = getattr(response, "choices", None)
+        if isinstance(choices, list) and choices:
+            return
+
+        preview = response if isinstance(response, str) else repr(response)
+        preview = preview.strip().replace("\n", " ")[:200]
+        raise RuntimeError(
+            "OpenAI-compatible endpoint returned a non-ChatCompletion payload. "
+            f"Expected `.choices`, got {type(response).__name__}. "
+            f"Preview: {preview}"
+        )
 
     @staticmethod
     def _serialize_anthropic_block(block) -> dict:

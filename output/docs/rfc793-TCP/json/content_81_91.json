@@ -1,0 +1,74 @@
+{
+  "doc_name": "rfc793-TCP.pdf",
+  "chunk_id": "81-91",
+  "start_page": 81,
+  "end_page": 91,
+  "pages": [
+    {
+      "page_num": 81,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nCLOSE-WAIT STATE\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT STATE\nThis should not occur, since a FIN has been received from the\nremote side. Ignore the segment text.\neighth, check the FIN bit,\nDo not process the FIN if the state is CLOSED, LISTEN or SYN-SENT\nsince the SEG.SEQ cannot be validated; drop the segment and\nreturn.\nIf the FIN bit is set, signal the user \"connection closing\" and\nreturn any pending RECEIVEs with same message, advance RCV.NXT\nover the FIN, and send an acknowledgment for the FIN. Note that\nFIN implies PUSH for any segment text not yet delivered to the\nuser.\nSYN-RECEIVED STATE\nESTABLISHED STATE\nEnter the CLOSE-WAIT state.\nFIN-WAIT-1 STATE\nIf our FIN has been ACKed (perhaps in this segment), then\nenter TIME-WAIT, start the time-wait timer, turn off the other\ntimers; otherwise enter the CLOSING state.\nFIN-WAIT-2 STATE\nEnter the TIME-WAIT state. Start the time-wait timer, turn\noff the other timers.\nCLOSE-WAIT STATE\nRemain in the CLOSE-WAIT state.\nCLOSING STATE\nRemain in the CLOSING state.\nLAST-ACK STATE\nRemain in the LAST-ACK state.\n[Page 75]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 82,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nTIME-WAIT STATE\nRemain in the TIME-WAIT state. Restart the 2 MSL time-wait\ntimeout.\nand return.\n[Page 76]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 83,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nUSER TIMEOUT\nUSER TIMEOUT\nFor any state if the user timeout expires, flush all queues, signal\nthe user \"error: connection aborted due to user timeout\" in general\nand for any outstanding calls, delete the TCB, enter the CLOSED\nstate and return.\nRETRANSMISSION TIMEOUT\nFor any state if the retransmission timeout expires on a segment in\nthe retransmission queue, send the segment at the front of the\nretransmission queue again, reinitialize the retransmission timer,\nand return.\nTIME-WAIT TIMEOUT\nIf the time-wait timeout expires on a connection delete the TCB,\nenter the CLOSED state and return.\n[Page 77]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 84,
+      "text": "September 1981\nTransmission Control Protocol\n[Page 78]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 85,
+      "text": "September 1981\nTransmission Control Protocol\nGLOSSARY\n1822\nBBN Report 1822, \"The Specification of the Interconnection of\na Host and an IMP\". The specification of interface between a\nhost and the ARPANET.\nACK\nA control bit (acknowledge) occupying no sequence space, which\nindicates that the acknowledgment field of this segment\nspecifies the next sequence number the sender of this segment\nis expecting to receive, hence acknowledging receipt of all\nprevious sequence numbers.\nARPANET message\nThe unit of transmission between a host and an IMP in the\nARPANET. The maximum size is about 1012 octets (8096 bits).\nARPANET packet\nA unit of transmission used internally in the ARPANET between\nIMPs. The maximum size is about 126 octets (1008 bits).\nconnection\nA logical communication path identified by a pair of sockets.\ndatagram\nA message sent in a packet switched computer communications\nnetwork.\nDestination Address\nThe destination address, usually the network and host\nidentifiers.\nFIN\nA control bit (finis) occupying one sequence number, which\nindicates that the sender will send no more data or control\noccupying sequence space.\nfragment\nA portion of a logical unit of data, in particular an internet\nfragment is a portion of an internet datagram.\nFTP\nA file transfer protocol.\n[Page 79]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 86,
+      "text": "September 1981\nTransmission Control Protocol\nGlossary\nheader\nControl information at the beginning of a message, segment,\nfragment, packet or block of data.\nhost\nA computer. In particular a source or destination of messages\nfrom the point of view of the communication network.\nIdentification\nAn Internet Protocol field. This identifying value assigned\nby the sender aids in assembling the fragments of a datagram.\nIMP\nThe Interface Message Processor, the packet switch of the\nARPANET.\ninternet address\nA source or destination address specific to the host level.\ninternet datagram\nThe unit of data exchanged between an internet module and the\nhigher level protocol together with the internet header.\ninternet fragment\nA portion of the data of an internet datagram with an internet\nheader.\nIP\nInternet Protocol.\nIRS\nThe Initial Receive Sequence number. The first sequence\nnumber used by the sender on a connection.\nISN\nThe Initial Sequence Number. The first sequence number used\non a connection, (either ISS or IRS). Selected on a clock\nbased procedure.\nISS\nThe Initial Send Sequence number. The first sequence number\nused by the sender on a connection.\nleader\nControl information at the beginning of a message or block of\ndata. In particular, in the ARPANET, the control information\non an ARPANET message at the host-IMP interface.\n[Page 80]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 87,
+      "text": "September 1981\nTransmission Control Protocol\nGlossary\nleft sequence\nThis is the next sequence number to be acknowledged by the\ndata receiving TCP (or the lowest currently unacknowledged\nsequence number) and is sometimes referred to as the left edge\nof the send window.\nlocal packet\nThe unit of transmission within a local network.\nmodule\nAn implementation, usually in software, of a protocol or other\nprocedure.\nMSL\nMaximum Segment Lifetime, the time a TCP segment can exist in\nthe internetwork system. Arbitrarily defined to be 2 minutes.\noctet\nAn eight bit byte.\nOptions\nAn Option field may contain several options, and each option\nmay be several octets in length. The options are used\nprimarily in testing situations; for example, to carry\ntimestamps. Both the Internet Protocol and TCP provide for\noptions fields.\npacket\nA package of data with a header which may or may not be\nlogically complete. More often a physical packaging than a\nlogical packaging of data.\nport\nThe portion of a socket that specifies which logical input or\noutput channel of a process is associated with the data.\nprocess\nA program in execution. A source or destination of data from\nthe point of view of the TCP or other host-to-host protocol.\nPUSH\nA control bit occupying no sequence space, indicating that\nthis segment contains data that must be pushed through to the\nreceiving user.\nRCV.NXT\nreceive next sequence number\n[Page 81]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 88,
+      "text": "September 1981\nTransmission Control Protocol\nGlossary\nRCV.UP\nreceive urgent pointer\nRCV.WND\nreceive window\nreceive next sequence number\nThis is the next sequence number the local TCP is expecting to\nreceive.\nreceive window\nThis represents the sequence numbers the local (receiving) TCP\nis willing to receive. Thus, the local TCP considers that\nsegments overlapping the range RCV.NXT to\nRCV.NXT + RCV.WND - 1 carry acceptable data or control.\nSegments containing sequence numbers entirely outside of this\nrange are considered duplicates and discarded.\nRST\nA control bit (reset), occupying no sequence space, indicating\nthat the receiver should delete the connection without further\ninteraction. The receiver can determine, based on the\nsequence number and acknowledgment fields of the incoming\nsegment, whether it should honor the reset command or ignore\nit. In no case does receipt of a segment containing RST give\nrise to a RST in response.\nRTP\nReal Time Protocol: A host-to-host protocol for communication\nof time critical information.\nSEG.ACK\nsegment acknowledgment\nSEG.LEN\nsegment length\nSEG.PRC\nsegment precedence value\nSEG.SEQ\nsegment sequence\nSEG.UP\nsegment urgent pointer field\n[Page 82]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 89,
+      "text": "September 1981\nTransmission Control Protocol\nGlossary\nSEG.WND\nsegment window field\nsegment\nA logical unit of data, in particular a TCP segment is the\nunit of data transfered between a pair of TCP modules.\nsegment acknowledgment\nThe sequence number in the acknowledgment field of the\narriving segment.\nsegment length\nThe amount of sequence number space occupied by a segment,\nincluding any controls which occupy sequence space.\nsegment sequence\nThe number in the sequence field of the arriving segment.\nsend sequence\nThis is the next sequence number the local (sending) TCP will\nuse on the connection. It is initially selected from an\ninitial sequence number curve (ISN) and is incremented for\neach octet of data or sequenced control transmitted.\nsend window\nThis represents the sequence numbers which the remote\n(receiving) TCP is willing to receive. It is the value of the\nwindow field specified in segments from the remote (data\nreceiving) TCP. The range of new sequence numbers which may\nbe emitted by a TCP lies between SND.NXT and\nSND.UNA + SND.WND - 1. (Retransmissions of sequence numbers\nbetween SND.UNA and SND.NXT are expected, of course.)\nSND.NXT\nsend sequence\nSND.UNA\nleft sequence\nSND.UP\nsend urgent pointer\nSND.WL1\nsegment sequence number at last window update\nSND.WL2\nsegment acknowledgment number at last window update\n[Page 83]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 90,
+      "text": "September 1981\nTransmission Control Protocol\nGlossary\nSND.WND\nsend window\nsocket\nAn address which specifically includes a port identifier, that\nis, the concatenation of an Internet Address with a TCP port.\nSource Address\nThe source address, usually the network and host identifiers.\nSYN\nA control bit in the incoming segment, occupying one sequence\nnumber, used at the initiation of a connection, to indicate\nwhere the sequence numbering will start.\nTCB\nTransmission control block, the data structure that records\nthe state of a connection.\nTCB.PRC\nThe precedence of the connection.\nTCP\nTransmission Control Protocol: A host-to-host protocol for\nreliable communication in internetwork environments.\nTOS\nType of Service, an Internet Protocol field.\nType of Service\nAn Internet Protocol field which indicates the type of service\nfor this internet fragment.\nURG\nA control bit (urgent), occupying no sequence space, used to\nindicate that the receiving user should be notified to do\nurgent processing as long as there is data to be consumed with\nsequence numbers less than the value indicated in the urgent\npointer.\nurgent pointer\nA control field meaningful only when the URG bit is on. This\nfield communicates the value of the urgent pointer which\nindicates the data octet associated with the sending user’s\nurgent call.\n[Page 84]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 91,
+      "text": "September 1981\nTransmission Control Protocol\nREFERENCES\n[1] Cerf, V., and R. Kahn, \"A Protocol for Packet Network\nIntercommunication\", IEEE Transactions on Communications,\nVol. COM-22, No. 5, pp 637-648, May 1974.\n[2] Postel, J. (ed.), \"Internet Protocol - DARPA Internet Program\nProtocol Specification\", RFC 791, USC/Information Sciences\nInstitute, September 1981.\n[3] Dalal, Y. and C. Sunshine, \"Connection Management in Transport\nProtocols\", Computer Networks, Vol. 2, No. 6, pp. 454-473,\nDecember 1978.\n[4] Postel, J., \"Assigned Numbers\", RFC 790, USC/Information Sciences\nInstitute, September 1981.\n[Page 85]",
+      "tables": [],
+      "images": []
+    }
+  ]
+}

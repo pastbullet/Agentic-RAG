@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/context/stores/evidence_store.py
+# hypothesis_version: 6.151.9
+
+['.json', 'content', 'evidence_id', 'extracted_in_turn', 'source_doc', 'source_page', 'used_in_turns']

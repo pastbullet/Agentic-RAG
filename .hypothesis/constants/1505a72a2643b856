@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/fsm_ir.py
+# hypothesis_version: 6.151.9
+
+['!=', '-', '=', '==', 'FSM_ACTION_UNPARSED', 'FSM_GUARD_UNPARSED', '_', 'cancel_timer', 'context_field_eq', 'context_field_ne', 'emit_message', 'field_comparison', 'flag_check', 'set_state', 'start_timer', 'timer_fired', 'update_field', 'warning']

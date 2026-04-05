@@ -9,6 +9,13 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
+from src.extract.fsm_ir import lower_all_state_machines
+from src.extract.state_context_alignment import validate_all_fsm_context_alignments
+from src.extract.state_context_materializer import (
+    canonicalize_context_name,
+    load_context_patches,
+    materialize_all_state_contexts,
+)
 from src.extract.message_ir import (
     PackedContainerLayout,
     build_packed_containers,
@@ -17,7 +24,23 @@ from src.extract.message_ir import (
 )
 from src.extract.option_tlv_models import OptionItemIR, OptionListIR, OptionValueFieldIR
 from src.extract.rule_dsl import RuleSyntaxError, render_rule_expression_as_c
-from src.models import CompositeTailIR, FieldIR, MessageIR, NormalizationStatus, ProtocolField, ProtocolMessage, ProtocolSchema, ProtocolStateMachine
+from src.models import (
+    AlignmentReport,
+    CompositeTailIR,
+    ContextFieldIR,
+    ContextTimerIR,
+    FSMIRv1,
+    FieldIR,
+    MessageIR,
+    NormalizationStatus,
+    ProtocolField,
+    ProtocolMessage,
+    ProtocolSchema,
+    ProtocolStateMachine,
+    StateContextIR,
+    StateEventBlock,
+    TransitionBranch,
+)
 
 
 GENERATOR_NAME = "protocol-twin-codegen"
@@ -50,6 +73,31 @@ class CodegenResult:
     generated_msg_headers: list[str] = field(default_factory=list)
     generated_msgs: list[ProtocolMessage] = field(default_factory=list)
     generated_message_irs: list[MessageIR] = field(default_factory=list)
+    typed_action_count: int = 0
+    generated_action_count: int = 0
+    degraded_action_count: int = 0
+    action_codegen_ratio: float = 0.0
+
+
+@dataclass
+class ContextCodegenInfo:
+    header_name: str
+    source_name: str
+    struct_name: str
+    init_function: str
+    timer_slot_name: str
+    state_enum_name: str | None
+    state_field_name: str | None
+    state_field_valid: bool
+    state_value_to_enum: dict[str, str]
+    field_map: dict[str, ContextFieldIR]
+    timer_map: dict[str, ContextTimerIR]
+
+
+@dataclass
+class ActionRenderResult:
+    lines: list[str]
+    generated: bool
 
 
 def _sanitize_c_identifier(name: str | None) -> str:
@@ -85,6 +133,17 @@ def _protocol_prefix(protocol_name: str | None) -> str:
 
 def _collapse_display_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" -_/")
+
+
+def _state_machine_component_names(state_machines: list[ProtocolStateMachine]) -> list[str]:
+    counts: dict[str, int] = {}
+    component_names: list[str] = []
+    for state_machine in state_machines:
+        base_name = _to_lower_snake(standardize_sm_name(state_machine.name))
+        occurrence = counts.get(base_name, 0) + 1
+        counts[base_name] = occurrence
+        component_names.append(base_name if occurrence == 1 else f"{base_name}_{occurrence}")
+    return component_names
 
 
 def standardize_sm_name(canonical_name: str) -> str:
@@ -161,10 +220,39 @@ def _build_expected_symbols(
     generated_sms: list[ProtocolStateMachine],
     generated_msgs: list[ProtocolMessage | MessageIR],
     protocol_prefix: str,
+    *,
+    sm_component_names: list[str] | None = None,
+    include_context: bool | None = None,
+    include_context_state_enum: bool | None = None,
 ) -> list[dict]:
+    emit_context = bool(generated_sms) if include_context is None else include_context
+    emit_context_state_enum = bool(generated_sms) if include_context_state_enum is None else include_context_state_enum
     symbols: list[dict] = []
-    for state_machine in generated_sms:
-        sm_name = _to_lower_snake(standardize_sm_name(state_machine.name))
+    if emit_context:
+        symbols.extend(
+            [
+                {
+                    "symbol": f"{protocol_prefix}_context",
+                    "kind": "struct",
+                    "source": f"{protocol_prefix}_context",
+                },
+                {
+                    "symbol": f"{protocol_prefix}_context_init",
+                    "kind": "function",
+                    "source": f"{protocol_prefix}_context",
+                },
+            ]
+        )
+        if emit_context_state_enum:
+            symbols.append(
+                {
+                    "symbol": f"{protocol_prefix}_ctx_state",
+                    "kind": "enum",
+                    "source": f"{protocol_prefix}_context",
+                }
+            )
+    resolved_sm_component_names = sm_component_names or _state_machine_component_names(generated_sms)
+    for state_machine, sm_name in zip(generated_sms, resolved_sm_component_names):
         symbols.extend(
             [
                 {
@@ -230,12 +318,12 @@ def _load_templates() -> Environment:
     return env
 
 
-def _header_name_for_state_machine(protocol_prefix: str, state_machine: ProtocolStateMachine) -> str:
-    return f"{protocol_prefix}_sm_{_to_lower_snake(standardize_sm_name(state_machine.name))}.h"
+def _header_name_for_state_machine(protocol_prefix: str, component_name: str) -> str:
+    return f"{protocol_prefix}_sm_{component_name}.h"
 
 
-def _source_name_for_state_machine(protocol_prefix: str, state_machine: ProtocolStateMachine) -> str:
-    return f"{protocol_prefix}_sm_{_to_lower_snake(standardize_sm_name(state_machine.name))}.c"
+def _source_name_for_state_machine(protocol_prefix: str, component_name: str) -> str:
+    return f"{protocol_prefix}_sm_{component_name}.c"
 
 
 def _header_name_for_message(protocol_prefix: str, message: ProtocolMessage | MessageIR) -> str:
@@ -256,10 +344,10 @@ def _build_state_machine_context(
     protocol_prefix: str,
     schema: ProtocolSchema,
     state_machine: ProtocolStateMachine,
+    component_name: str,
     header_name: str,
 ) -> dict:
     display_name = standardize_sm_name(state_machine.name)
-    component_name = _to_lower_snake(display_name)
     symbol_prefix = f"{protocol_prefix}_{component_name}"
     state_names = [state.name for state in state_machine.states]
     event_names = sorted({transition.event for transition in state_machine.transitions if transition.event})
@@ -310,8 +398,502 @@ def _build_state_machine_context(
         "generator_name": GENERATOR_NAME,
         "include_guard": f"{_to_upper_snake(header_name)}_H",
         "header_name": header_name,
+        "context_header_name": _context_header_name(protocol_prefix),
+        "context_struct_name": _context_struct_name(protocol_prefix),
         "state_machine_name": state_machine.name,
         "state_machine_display_name": display_name,
+        "typed_action_count": 0,
+        "generated_action_count": 0,
+        "degraded_action_count": 0,
+    }
+
+
+def _context_header_name(protocol_prefix: str) -> str:
+    return f"{protocol_prefix}_context.h"
+
+
+def _context_source_name(protocol_prefix: str) -> str:
+    return f"{protocol_prefix}_context.c"
+
+
+def _context_struct_name(protocol_prefix: str) -> str:
+    return f"{protocol_prefix}_context"
+
+
+def _context_timer_slot_name(protocol_prefix: str) -> str:
+    return f"{protocol_prefix}_timer_slot"
+
+
+def _context_init_function(protocol_prefix: str) -> str:
+    return f"{protocol_prefix}_context_init"
+
+
+def _context_state_enum_name(protocol_prefix: str) -> str:
+    return f"{protocol_prefix}_ctx_state"
+
+
+def _context_state_enum_entry(protocol_prefix: str, state_name: str) -> str:
+    return f"{_to_upper_snake(protocol_prefix)}_CTX_STATE_{_to_upper_snake(state_name)}"
+
+
+def _canonical_context_field_name(raw_name: str | None, protocol_name: str) -> str | None:
+    if not raw_name:
+        return None
+    canonical = canonicalize_context_name(raw_name, protocol_name)
+    return canonical or None
+
+
+def _safe_int_literal(value: str | None) -> str | None:
+    text = (value or "").strip()
+    if re.fullmatch(r"\d+", text):
+        return text
+    return None
+
+
+def _safe_bool_literal(value: str | None) -> str | None:
+    text = (value or "").strip().lower()
+    if text == "true":
+        return "true"
+    if text == "false":
+        return "false"
+    return None
+
+
+def _collect_protocol_context_states(
+    protocol_prefix: str,
+    fsm_irs: list[FSMIRv1],
+) -> tuple[list[dict[str, str]], dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    value_to_enum: dict[str, str] = {}
+    seen_symbols: set[str] = set()
+    for fsm_ir in sorted(fsm_irs, key=lambda item: item.name):
+        for state in sorted(fsm_ir.states, key=lambda item: item.name):
+            if not state.name:
+                continue
+            enum_entry = _context_state_enum_entry(protocol_prefix, state.name)
+            value_to_enum.setdefault(state.name, enum_entry)
+            if enum_entry in seen_symbols:
+                continue
+            seen_symbols.add(enum_entry)
+            entries.append({"name": enum_entry, "state_name": state.name})
+    return entries, value_to_enum
+
+
+def _resolve_context_state_literal(context_info: ContextCodegenInfo, value: str | None) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    direct = context_info.state_value_to_enum.get(text)
+    if direct:
+        return direct
+    folded = text.casefold()
+    for raw_value, enum_name in context_info.state_value_to_enum.items():
+        if raw_value.casefold() == folded:
+            return enum_name
+    return None
+
+
+def _context_field_c_type(
+    field: ContextFieldIR,
+    context_info: ContextCodegenInfo,
+) -> tuple[str, str | None]:
+    canonical_name = field.canonical_name
+    type_kind = (field.type_kind or "opaque").lower()
+    if context_info.state_field_valid and canonical_name == context_info.state_field_name and context_info.state_enum_name:
+        return context_info.state_enum_name, None
+    if type_kind == "bool":
+        return "bool", None
+    if type_kind == "u16":
+        return "uint16_t", None
+    if type_kind in {"u32", "counter"}:
+        return "uint32_t", None
+    if type_kind in {"u64", "timestamp"}:
+        return "uint64_t", None
+    if type_kind == "enum":
+        return "uint32_t", "/* TODO: conservative fallback for enum */"
+    return "uint32_t", "/* TODO: conservative fallback for opaque field */"
+
+
+def _context_field_map(context: StateContextIR, protocol_name: str) -> dict[str, ContextFieldIR]:
+    result: dict[str, ContextFieldIR] = {}
+    for field in context.fields:
+        canonical_name = _canonical_context_field_name(field.canonical_name, protocol_name)
+        if canonical_name:
+            result[canonical_name] = field
+    return result
+
+
+def _context_timer_map(context: StateContextIR, protocol_name: str) -> dict[str, ContextTimerIR]:
+    result: dict[str, ContextTimerIR] = {}
+    for timer in context.timers:
+        canonical_name = _canonical_context_field_name(timer.canonical_name, protocol_name)
+        if canonical_name:
+            result[canonical_name] = timer
+    return result
+
+
+def _build_protocol_context_context(
+    protocol_prefix: str,
+    schema: ProtocolSchema,
+    context: StateContextIR,
+) -> tuple[dict, ContextCodegenInfo]:
+    header_name = _context_header_name(protocol_prefix)
+    source_name = _context_source_name(protocol_prefix)
+    struct_name = _context_struct_name(protocol_prefix)
+    init_function = _context_init_function(protocol_prefix)
+    timer_slot_name = _context_timer_slot_name(protocol_prefix)
+    field_map = _context_field_map(context, schema.protocol_name)
+    timer_map = _context_timer_map(context, schema.protocol_name)
+    state_entries, state_value_to_enum = _collect_protocol_context_states(protocol_prefix, schema.fsm_irs)
+    state_field_name = _canonical_context_field_name(context.state_field, schema.protocol_name)
+    state_enum_name = _context_state_enum_name(protocol_prefix) if state_field_name and state_entries else None
+    state_field_valid = bool(
+        state_field_name
+        and state_enum_name
+        and state_field_name in field_map
+        and field_map[state_field_name].semantic_role == "state"
+    )
+    context_info = ContextCodegenInfo(
+        header_name=header_name,
+        source_name=source_name,
+        struct_name=struct_name,
+        init_function=init_function,
+        timer_slot_name=timer_slot_name,
+        state_enum_name=state_enum_name,
+        state_field_name=state_field_name,
+        state_field_valid=state_field_valid,
+        state_value_to_enum=state_value_to_enum,
+        field_map=field_map,
+        timer_map=timer_map,
+    )
+
+    field_members: list[dict[str, str | None]] = []
+    init_lines: list[str] = []
+    for field in sorted(context.fields, key=lambda item: item.canonical_name):
+        member_name = _to_lower_snake(field.canonical_name)
+        c_type, comment = _context_field_c_type(field, context_info)
+        field_members.append(
+            {
+                "declaration": f"{c_type} {member_name};",
+                "comment": comment,
+            }
+        )
+        initial_expr = (field.initial_value_expr or "").strip()
+        if not initial_expr:
+            continue
+        literal = None
+        if context_info.state_field_valid and field.canonical_name == context_info.state_field_name:
+            literal = _resolve_context_state_literal(context_info, initial_expr)
+        literal = literal or _safe_bool_literal(initial_expr) or _safe_int_literal(initial_expr)
+        if literal is not None:
+            init_lines.append(f"ctx->{member_name} = {literal};")
+        else:
+            init_lines.append(
+                f"/* TODO: initial_value_expr for {member_name}: {field.initial_value_expr} */"
+            )
+
+    timer_members = [
+        {
+            "declaration": f"{timer_slot_name} {_to_lower_snake(timer.canonical_name)};",
+            "comment": None,
+        }
+        for timer in sorted(context.timers, key=lambda item: item.canonical_name)
+    ]
+
+    return (
+        {
+            "protocol_prefix": protocol_prefix,
+            "include_guard": f"{_to_upper_snake(header_name)}_H",
+            "source_document": schema.source_document or schema.protocol_name,
+            "generator_name": GENERATOR_NAME,
+            "header_name": header_name,
+            "struct_name": struct_name,
+            "init_function": init_function,
+            "timer_slot_name": timer_slot_name,
+            "state_enum_name": state_enum_name,
+            "state_enum_entries": state_entries,
+            "field_members": field_members,
+            "timer_members": timer_members,
+            "init_lines": init_lines,
+        },
+        context_info,
+    )
+
+
+def _is_boolish_context_field(field: ContextFieldIR) -> bool:
+    type_kind = (field.type_kind or "").lower()
+    return type_kind == "bool" or "flag" in field.canonical_name.lower()
+
+
+def _render_context_literal(
+    value: str | None,
+    field_name: str,
+    context_info: ContextCodegenInfo,
+) -> str | None:
+    if context_info.state_field_valid and field_name == context_info.state_field_name:
+        enum_literal = _resolve_context_state_literal(context_info, value)
+        if enum_literal is not None:
+            return enum_literal
+    return _safe_bool_literal(value) or _safe_int_literal(value)
+
+
+def _typed_action_label(action) -> str:
+    if action.kind == "update_field":
+        return f"{action.kind}({action.target}, {action.value})"
+    return f"{action.kind}({action.target})"
+
+
+def _render_typed_action(
+    action,
+    *,
+    protocol_name: str,
+    context_info: ContextCodegenInfo,
+    resolved_fields: set[str],
+    resolved_timers: set[str],
+) -> ActionRenderResult:
+    if action.kind == "set_state":
+        if not context_info.state_field_valid or not context_info.state_field_name:
+            return ActionRenderResult(
+                [f"/* typed degraded: {_typed_action_label(action)} -- invalid state_field */"],
+                generated=False,
+            )
+        enum_literal = _resolve_context_state_literal(context_info, action.target)
+        if enum_literal is None:
+            return ActionRenderResult(
+                [f"/* typed degraded: {_typed_action_label(action)} -- unknown context state literal */"],
+                generated=False,
+            )
+        return ActionRenderResult(
+            [f"ctx->{_to_lower_snake(context_info.state_field_name)} = {enum_literal};"],
+            generated=True,
+        )
+
+    if action.kind == "update_field":
+        field_name = _canonical_context_field_name(action.target, protocol_name)
+        if field_name is None or field_name not in resolved_fields:
+            return ActionRenderResult(
+                [f"/* typed degraded: {_typed_action_label(action)} -- unresolved ctx field */"],
+                generated=False,
+            )
+        literal = _render_context_literal(action.value, field_name, context_info)
+        if literal is None:
+            return ActionRenderResult(
+                [f"/* typed degraded: {_typed_action_label(action)} -- unsupported non-literal value */"],
+                generated=False,
+            )
+        return ActionRenderResult(
+            [f"ctx->{_to_lower_snake(field_name)} = {literal};"],
+            generated=True,
+        )
+
+    if action.kind == "start_timer":
+        timer_name = _canonical_context_field_name(action.target, protocol_name)
+        if timer_name is None or timer_name not in resolved_timers:
+            return ActionRenderResult(
+                [f"/* typed degraded: {_typed_action_label(action)} -- unresolved timer */"],
+                generated=False,
+            )
+        duration_expr = context_info.timer_map.get(timer_name).duration_expr if timer_name in context_info.timer_map else None
+        todo_comment = duration_expr or "unavailable"
+        return ActionRenderResult(
+            [
+                f"ctx->{_to_lower_snake(timer_name)}.active = true;",
+                f"ctx->{_to_lower_snake(timer_name)}.deadline_ms = 0;",
+                f"/* TODO: duration_expr={todo_comment} */",
+            ],
+            generated=True,
+        )
+
+    if action.kind == "cancel_timer":
+        timer_name = _canonical_context_field_name(action.target, protocol_name)
+        if timer_name is None or timer_name not in resolved_timers:
+            return ActionRenderResult(
+                [f"/* typed degraded: {_typed_action_label(action)} -- unresolved timer */"],
+                generated=False,
+            )
+        return ActionRenderResult(
+            [
+                f"ctx->{_to_lower_snake(timer_name)}.active = false;",
+                f"ctx->{_to_lower_snake(timer_name)}.deadline_ms = 0;",
+            ],
+            generated=True,
+        )
+
+    if action.kind == "emit_message":
+        return ActionRenderResult(
+            [f"/* typed degraded: {_typed_action_label(action)} -- emit_message placeholder */"],
+            generated=False,
+        )
+
+    return ActionRenderResult([f"/* typed degraded: {_typed_action_label(action)} -- unsupported action */"], generated=False)
+
+
+def _guard_to_c_expr(
+    branch: TransitionBranch,
+    *,
+    protocol_name: str,
+    context_info: ContextCodegenInfo,
+    resolved_fields: set[str],
+) -> str:
+    guard = branch.guard_typed
+    if guard is None:
+        return "0" if branch.guard_raw.strip() else ""
+    if guard.kind == "always":
+        return "1"
+    if guard.ref_source != "ctx":
+        return "0"
+
+    field_name = _canonical_context_field_name(guard.field_ref, protocol_name)
+    if field_name is None or field_name not in resolved_fields:
+        return "0"
+
+    field = context_info.field_map.get(field_name)
+    if guard.kind == "flag_check" and field is not None and _is_boolish_context_field(field):
+        return f"ctx->{_to_lower_snake(field_name)}"
+
+    if guard.kind in {"context_field_eq", "context_field_ne"} and guard.operator in {"==", "!="}:
+        literal = _render_context_literal(guard.value, field_name, context_info)
+        if literal is not None:
+            return f"ctx->{_to_lower_snake(field_name)} {guard.operator} {literal}"
+
+    return "0"
+
+
+def _actions_to_c(
+    branch: TransitionBranch,
+    *,
+    protocol_name: str,
+    context_info: ContextCodegenInfo,
+    resolved_fields: set[str],
+    resolved_timers: set[str],
+) -> tuple[list[str], int, int]:
+    """Render actions as C lines with action-level degradation."""
+    lines: list[str] = []
+    generated_count = 0
+    degraded_count = 0
+    for action in branch.actions_typed:
+        rendered = _render_typed_action(
+            action,
+            protocol_name=protocol_name,
+            context_info=context_info,
+            resolved_fields=resolved_fields,
+            resolved_timers=resolved_timers,
+        )
+        lines.extend(rendered.lines)
+        if rendered.generated:
+            generated_count += 1
+        else:
+            degraded_count += 1
+    for raw in branch.actions_raw:
+        lines.append(f"/* action: {raw} */")
+    return lines, generated_count, degraded_count
+
+
+def _build_fsm_ir_context(
+    protocol_prefix: str,
+    schema: ProtocolSchema,
+    fsm_ir: FSMIRv1,
+    component_name: str,
+    header_name: str,
+    context_info: ContextCodegenInfo,
+) -> dict:
+    """Build template context from FSMIRv1 with grouped blocks."""
+    display_name = standardize_sm_name(fsm_ir.name)
+    symbol_prefix = f"{protocol_prefix}_{component_name}"
+    state_names = [state.name for state in fsm_ir.states]
+    state_entries = _enum_entries(f"{symbol_prefix}_STATE", state_names, "UNSPECIFIED")
+    event_entries = _enum_entries(f"{symbol_prefix}_EVENT", fsm_ir.events, "NONE")
+    state_lookup = dict(zip(state_names, state_entries))
+    event_lookup = dict(zip(fsm_ir.events, event_entries))
+
+    def _resolve_state(name: str) -> str:
+        return state_lookup.get(name, f"{symbol_prefix}_STATE_{_to_upper_snake(name or 'UNSPECIFIED')}")
+
+    def _resolve_event(name: str) -> str:
+        return event_lookup.get(name, f"{symbol_prefix}_EVENT_{_to_upper_snake(name or 'NONE')}")
+
+    def _branch_has_guard(branch: TransitionBranch) -> bool:
+        return bool(branch.guard_raw.strip()) or branch.guard_typed is not None
+
+    resolved_fields = set(context_info.field_map)
+    resolved_timers = set(context_info.timer_map)
+    typed_action_count = 0
+    generated_action_count = 0
+    degraded_action_count = 0
+
+    # Build state_blocks: dict mapping state_enum → list of event blocks
+    state_blocks: dict[str, list[dict]] = {}
+    for state, state_enum_val in zip(fsm_ir.states, state_entries):
+        state_blocks[state_enum_val] = []
+
+    for block in fsm_ir.blocks:
+        state_enum_val = _resolve_state(block.from_state)
+        event_enum_val = _resolve_event(block.event)
+        branches_ctx = []
+        ordered_branches = sorted(block.branches, key=lambda branch: 0 if _branch_has_guard(branch) else 1)
+        for branch in ordered_branches:
+            guard_comment = (branch.guard_raw or (branch.guard_typed.description if branch.guard_typed else "")).strip()
+            actions_c, branch_generated_actions, branch_degraded_actions = _actions_to_c(
+                branch,
+                protocol_name=schema.protocol_name,
+                context_info=context_info,
+                resolved_fields=resolved_fields,
+                resolved_timers=resolved_timers,
+            )
+            typed_action_count += len(branch.actions_typed)
+            generated_action_count += branch_generated_actions
+            degraded_action_count += branch_degraded_actions
+            branches_ctx.append({
+                "guard_c_expr": _guard_to_c_expr(
+                    branch,
+                    protocol_name=schema.protocol_name,
+                    context_info=context_info,
+                    resolved_fields=resolved_fields,
+                ),
+                "guard_comment": guard_comment,
+                "has_guard": _branch_has_guard(branch),
+                "actions_c": actions_c,
+                # A missing next_state is not executable today; safely stay in place.
+                "next_state_enum": _resolve_state(branch.next_state or block.from_state),
+                "readiness": branch.readiness.value,
+            })
+        if state_enum_val not in state_blocks:
+            state_blocks[state_enum_val] = []
+        state_blocks[state_enum_val].append({
+            "event_enum": event_enum_val,
+            "branches": branches_ctx,
+        })
+
+    return {
+        "protocol_prefix": protocol_prefix,
+        "component_name": component_name,
+        "symbol_prefix": symbol_prefix,
+        "state_enum": f"{symbol_prefix}_state",
+        "event_enum": f"{symbol_prefix}_event",
+        "function_name": f"{symbol_prefix}_transition",
+        "states": [
+            {
+                "name": entry,
+                "description": state.description,
+                "is_initial": state.is_initial,
+                "is_final": state.is_final,
+            }
+            for state, entry in zip(fsm_ir.states, state_entries)
+        ]
+        or [{"name": state_entries[0], "description": "", "is_initial": False, "is_final": False}],
+        "events": event_entries,
+        "state_blocks": state_blocks,
+        "source_document": schema.source_document or schema.protocol_name,
+        "generator_name": GENERATOR_NAME,
+        "include_guard": f"{_to_upper_snake(header_name)}_H",
+        "header_name": header_name,
+        "context_header_name": context_info.header_name,
+        "context_struct_name": context_info.struct_name,
+        "state_machine_name": fsm_ir.name,
+        "state_machine_display_name": display_name,
+        "typed_action_count": typed_action_count,
+        "generated_action_count": generated_action_count,
+        "degraded_action_count": degraded_action_count,
     }
 
 
@@ -1579,6 +2161,29 @@ def _main_header_context(protocol_prefix: str, schema: ProtocolSchema, sub_heade
     }
 
 
+def _prepare_codegen_inputs(
+    sorted_schema: ProtocolSchema,
+) -> tuple[list[FSMIRv1], StateContextIR | None, AlignmentReport | None]:
+    fsm_irs: list[FSMIRv1] = []
+    if sorted_schema.fsm_irs:
+        fsm_irs = list(sorted_schema.fsm_irs)
+    elif sorted_schema.state_machines:
+        sorted_schema.fsm_irs = lower_all_state_machines(sorted_schema)
+        fsm_irs = list(sorted_schema.fsm_irs)
+
+    primary_context: StateContextIR | None = None
+    alignment_report: AlignmentReport | None = None
+    if sorted_schema.fsm_irs:
+        if not sorted_schema.state_contexts:
+            context_patches = load_context_patches(sorted_schema.protocol_name)
+            sorted_schema.state_contexts = materialize_all_state_contexts(sorted_schema, context_patches)
+        if sorted_schema.state_contexts:
+            primary_context = sorted_schema.state_contexts[0]
+            alignment_report = validate_all_fsm_context_alignments(sorted_schema.fsm_irs, primary_context)
+
+    return fsm_irs, primary_context, alignment_report
+
+
 def _write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -1602,19 +2207,52 @@ def generate_code(schema: ProtocolSchema, output_dir: str) -> CodegenResult:
     protocol_prefix = _protocol_prefix(sorted_schema.protocol_name)
     result = CodegenResult()
     generated_sms: list[ProtocolStateMachine] = []
+    generated_sm_component_names: list[str] = []
     sub_headers: list[str] = []
 
+    ctx_h_template = env.get_template("state_context.h.j2")
+    ctx_c_template = env.get_template("state_context.c.j2")
     sm_h_template = env.get_template("state_machine.h.j2")
     sm_c_template = env.get_template("state_machine.c.j2")
     msg_h_template = env.get_template("message.h.j2")
     msg_c_template = env.get_template("message.c.j2")
     main_h_template = env.get_template("main_header.h.j2")
 
-    for state_machine in sorted_schema.state_machines:
+    fsm_irs, primary_context, _alignment_report = _prepare_codegen_inputs(sorted_schema)
+    sm_component_names = _state_machine_component_names(sorted_schema.state_machines)
+    context_info: ContextCodegenInfo | None = None
+    if primary_context is not None and sorted_schema.state_machines:
+        context_ctx, context_info = _build_protocol_context_context(protocol_prefix, sorted_schema, primary_context)
+        context_header_path = output_path / context_info.header_name
+        context_source_path = output_path / context_info.source_name
+        _write_text(context_header_path, ctx_h_template.render(**context_ctx))
+        _write_text(context_source_path, ctx_c_template.render(**context_ctx))
+        result.files.extend([str(context_header_path), str(context_source_path)])
+        sub_headers.append(context_info.header_name)
+
+    for index, state_machine in enumerate(sorted_schema.state_machines):
         try:
-            header_name = _header_name_for_state_machine(protocol_prefix, state_machine)
-            source_name = _source_name_for_state_machine(protocol_prefix, state_machine)
-            context = _build_state_machine_context(protocol_prefix, sorted_schema, state_machine, header_name)
+            component_name = sm_component_names[index]
+            header_name = _header_name_for_state_machine(protocol_prefix, component_name)
+            source_name = _source_name_for_state_machine(protocol_prefix, component_name)
+            fsm_ir = fsm_irs[index] if index < len(fsm_irs) else None
+            if fsm_ir is not None and context_info is not None:
+                context = _build_fsm_ir_context(
+                    protocol_prefix,
+                    sorted_schema,
+                    fsm_ir,
+                    component_name,
+                    header_name,
+                    context_info,
+                )
+            else:
+                context = _build_state_machine_context(
+                    protocol_prefix,
+                    sorted_schema,
+                    state_machine,
+                    component_name,
+                    header_name,
+                )
             header_path = output_path / header_name
             source_path = output_path / source_name
             _write_text(header_path, sm_h_template.render(**context))
@@ -1622,6 +2260,10 @@ def generate_code(schema: ProtocolSchema, output_dir: str) -> CodegenResult:
             result.files.extend([str(header_path), str(source_path)])
             sub_headers.append(header_name)
             generated_sms.append(state_machine)
+            generated_sm_component_names.append(component_name)
+            result.typed_action_count += int(context.get("typed_action_count", 0))
+            result.generated_action_count += int(context.get("generated_action_count", 0))
+            result.degraded_action_count += int(context.get("degraded_action_count", 0))
         except Exception as exc:
             result.skipped_components.append(
                 {"name": state_machine.name, "kind": "state_machine", "reason": str(exc)}
@@ -1671,5 +2313,15 @@ def generate_code(schema: ProtocolSchema, output_dir: str) -> CodegenResult:
         ),
     )
     result.files.append(str(main_header_path))
-    result.expected_symbols = _build_expected_symbols(generated_sms, result.generated_message_irs, protocol_prefix)
+    result.action_codegen_ratio = (
+        result.generated_action_count / result.typed_action_count if result.typed_action_count else 0.0
+    )
+    result.expected_symbols = _build_expected_symbols(
+        generated_sms,
+        result.generated_message_irs,
+        protocol_prefix,
+        sm_component_names=generated_sm_component_names,
+        include_context=context_info is not None,
+        include_context_state_enum=bool(context_info and context_info.state_enum_name),
+    )
     return result

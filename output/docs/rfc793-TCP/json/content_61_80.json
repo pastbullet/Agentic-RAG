@@ -1,0 +1,128 @@
+{
+  "doc_name": "rfc793-TCP.pdf",
+  "chunk_id": "61-80",
+  "start_page": 61,
+  "end_page": 80,
+  "pages": [
+    {
+      "page_num": 61,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nOPEN Call\nSYN-SENT STATE\nSYN-RECEIVED STATE\nESTABLISHED STATE\nFIN-WAIT-1 STATE\nFIN-WAIT-2 STATE\nCLOSE-WAIT STATE\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT STATE\nReturn \"error: connection already exists\".\n[Page 55]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 62,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEND Call\nSEND Call\nCLOSED STATE (i.e., TCB does not exist)\nIf the user does not have access to such a connection, then return\n\"error: connection illegal for this process\".\nOtherwise, return \"error: connection does not exist\".\nLISTEN STATE\nIf the foreign socket is specified, then change the connection\nfrom passive to active, select an ISS. Send a SYN segment, set\nSND.UNA to ISS, SND.NXT to ISS+1. Enter SYN-SENT state. Data\nassociated with SEND may be sent with SYN segment or queued for\ntransmission after entering ESTABLISHED state. The urgent bit if\nrequested in the command must be sent with the data segments sent\nas a result of this command. If there is no room to queue the\nrequest, respond with \"error: insufficient resources\". If\nForeign socket was not specified, then return \"error: foreign\nsocket unspecified\".\nSYN-SENT STATE\nSYN-RECEIVED STATE\nQueue the data for transmission after entering ESTABLISHED state.\nIf no space to queue, respond with \"error: insufficient\nresources\".\nESTABLISHED STATE\nCLOSE-WAIT STATE\nSegmentize the buffer and send it with a piggybacked\nacknowledgment (acknowledgment value = RCV.NXT). If there is\ninsufficient space to remember this buffer, simply return \"error:\ninsufficient resources\".\nIf the urgent flag is set, then SND.UP <- SND.NXT-1 and set the\nurgent pointer in the outgoing segments.\n[Page 56]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 63,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEND Call\nFIN-WAIT-1 STATE\nFIN-WAIT-2 STATE\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT STATE\nReturn \"error: connection closing\" and do not service request.\n[Page 57]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 64,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nRECEIVE Call\nRECEIVE Call\nCLOSED STATE (i.e., TCB does not exist)\nIf the user does not have access to such a connection, return\n\"error: connection illegal for this process\".\nOtherwise return \"error: connection does not exist\".\nLISTEN STATE\nSYN-SENT STATE\nSYN-RECEIVED STATE\nQueue for processing after entering ESTABLISHED state. If there\nis no room to queue this request, respond with \"error:\ninsufficient resources\".\nESTABLISHED STATE\nFIN-WAIT-1 STATE\nFIN-WAIT-2 STATE\nIf insufficient incoming segments are queued to satisfy the\nrequest, queue the request. If there is no queue space to\nremember the RECEIVE, respond with \"error: insufficient\nresources\".\nReassemble queued incoming segments into receive buffer and return\nto user. Mark \"push seen\" (PUSH) if this is the case.\nIf RCV.UP is in advance of the data currently being passed to the\nuser notify the user of the presence of urgent data.\nWhen the TCP takes responsibility for delivering data to the user\nthat fact must be communicated to the sender via an\nacknowledgment. The formation of such an acknowledgment is\ndescribed below in the discussion of processing an incoming\nsegment.\n[Page 58]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 65,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nRECEIVE Call\nCLOSE-WAIT STATE\nSince the remote side has already sent FIN, RECEIVEs must be\nsatisfied by text already on hand, but not yet delivered to the\nuser. If no text is awaiting delivery, the RECEIVE will get a\n\"error: connection closing\" response. Otherwise, any remaining\ntext can be used to satisfy the RECEIVE.\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT STATE\nReturn \"error: connection closing\".\n[Page 59]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 66,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nCLOSE Call\nCLOSE Call\nCLOSED STATE (i.e., TCB does not exist)\nIf the user does not have access to such a connection, return\n\"error: connection illegal for this process\".\nOtherwise, return \"error: connection does not exist\".\nLISTEN STATE\nAny outstanding RECEIVEs are returned with \"error: closing\"\nresponses. Delete TCB, enter CLOSED state, and return.\nSYN-SENT STATE\nDelete the TCB and return \"error: closing\" responses to any\nqueued SENDs, or RECEIVEs.\nSYN-RECEIVED STATE\nIf no SENDs have been issued and there is no pending data to send,\nthen form a FIN segment and send it, and enter FIN-WAIT-1 state;\notherwise queue for processing after entering ESTABLISHED state.\nESTABLISHED STATE\nQueue this until all preceding SENDs have been segmentized, then\nform a FIN segment and send it. In any case, enter FIN-WAIT-1\nstate.\nFIN-WAIT-1 STATE\nFIN-WAIT-2 STATE\nStrictly speaking, this is an error and should receive a \"error:\nconnection closing\" response. An \"ok\" response would be\nacceptable, too, as long as a second FIN is not emitted (the first\nFIN may be retransmitted though).\n[Page 60]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 67,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nCLOSE Call\nCLOSE-WAIT STATE\nQueue this request until all preceding SENDs have been\nsegmentized; then send a FIN segment, enter CLOSING state.\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT STATE\nRespond with \"error: connection closing\".\n[Page 61]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 68,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nABORT Call\nABORT Call\nCLOSED STATE (i.e., TCB does not exist)\nIf the user should not have access to such a connection, return\n\"error: connection illegal for this process\".\nOtherwise return \"error: connection does not exist\".\nLISTEN STATE\nAny outstanding RECEIVEs should be returned with \"error:\nconnection reset\" responses. Delete TCB, enter CLOSED state, and\nreturn.\nSYN-SENT STATE\nAll queued SENDs and RECEIVEs should be given \"connection reset\"\nnotification, delete the TCB, enter CLOSED state, and return.\nSYN-RECEIVED STATE\nESTABLISHED STATE\nFIN-WAIT-1 STATE\nFIN-WAIT-2 STATE\nCLOSE-WAIT STATE\nSend a reset segment:\n<SEQ=SND.NXT><CTL=RST>\nAll queued SENDs and RECEIVEs should be given \"connection reset\"\nnotification; all segments queued for transmission (except for the\nRST formed above) or retransmission should be flushed, delete the\nTCB, enter CLOSED state, and return.\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT STATE\nRespond with \"ok\" and delete the TCB, enter CLOSED state, and\nreturn.\n[Page 62]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 69,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSTATUS Call\nSTATUS Call\nCLOSED STATE (i.e., TCB does not exist)\nIf the user should not have access to such a connection, return\n\"error: connection illegal for this process\".\nOtherwise return \"error: connection does not exist\".\nLISTEN STATE\nReturn \"state = LISTEN\", and the TCB pointer.\nSYN-SENT STATE\nReturn \"state = SYN-SENT\", and the TCB pointer.\nSYN-RECEIVED STATE\nReturn \"state = SYN-RECEIVED\", and the TCB pointer.\nESTABLISHED STATE\nReturn \"state = ESTABLISHED\", and the TCB pointer.\nFIN-WAIT-1 STATE\nReturn \"state = FIN-WAIT-1\", and the TCB pointer.\nFIN-WAIT-2 STATE\nReturn \"state = FIN-WAIT-2\", and the TCB pointer.\nCLOSE-WAIT STATE\nReturn \"state = CLOSE-WAIT\", and the TCB pointer.\nCLOSING STATE\nReturn \"state = CLOSING\", and the TCB pointer.\nLAST-ACK STATE\nReturn \"state = LAST-ACK\", and the TCB pointer.\n[Page 63]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 70,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSTATUS Call\nTIME-WAIT STATE\nReturn \"state = TIME-WAIT\", and the TCB pointer.\n[Page 64]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 71,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nSEGMENT ARRIVES\nIf the state is CLOSED (i.e., TCB does not exist) then\nall data in the incoming segment is discarded. An incoming\nsegment containing a RST is discarded. An incoming segment not\ncontaining a RST causes a RST to be sent in response. The\nacknowledgment and sequence field values are selected to make the\nreset sequence acceptable to the TCP that sent the offending\nsegment.\nIf the ACK bit is off, sequence number zero is used,\n<SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>\nIf the ACK bit is on,\n<SEQ=SEG.ACK><CTL=RST>\nReturn.\nIf the state is LISTEN then\nfirst check for an RST\nAn incoming RST should be ignored. Return.\nsecond check for an ACK\nAny acknowledgment is bad if it arrives on a connection still in\nthe LISTEN state. An acceptable reset segment should be formed\nfor any arriving ACK-bearing segment. The RST should be\nformatted as follows:\n<SEQ=SEG.ACK><CTL=RST>\nReturn.\nthird check for a SYN\nIf the SYN bit is set, check the security. If the\nsecurity/compartment on the incoming segment does not exactly\nmatch the security/compartment in the TCB then send a reset and\nreturn.\n<SEQ=SEG.ACK><CTL=RST>\n[Page 65]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 72,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nIf the SEG.PRC is greater than the TCB.PRC then if allowed by\nthe user and the system set TCB.PRC<-SEG.PRC, if not allowed\nsend a reset and return.\n<SEQ=SEG.ACK><CTL=RST>\nIf the SEG.PRC is less than the TCB.PRC then continue.\nSet RCV.NXT to SEG.SEQ+1, IRS is set to SEG.SEQ and any other\ncontrol or text should be queued for processing later. ISS\nshould be selected and a SYN segment sent of the form:\n<SEQ=ISS><ACK=RCV.NXT><CTL=SYN,ACK>\nSND.NXT is set to ISS+1 and SND.UNA to ISS. The connection\nstate should be changed to SYN-RECEIVED. Note that any other\nincoming control or data (combined with SYN) will be processed\nin the SYN-RECEIVED state, but processing of SYN and ACK should\nnot be repeated. If the listen was not fully specified (i.e.,\nthe foreign socket was not fully specified), then the\nunspecified fields should be filled in now.\nfourth other text or control\nAny other control or text-bearing segment (not containing SYN)\nmust have an ACK and thus would be discarded by the ACK\nprocessing. An incoming RST segment could not be valid, since\nit could not have been sent in response to anything sent by this\nincarnation of the connection. So you are unlikely to get here,\nbut if you do, drop the segment, and return.\nIf the state is SYN-SENT then\nfirst check the ACK bit\nIf the ACK bit is set\nIf SEG.ACK =< ISS, or SEG.ACK > SND.NXT, send a reset (unless\nthe RST bit is set, if so drop the segment and return)\n<SEQ=SEG.ACK><CTL=RST>\nand discard the segment. Return.\nIf SND.UNA =< SEG.ACK =< SND.NXT then the ACK is acceptable.\nsecond check the RST bit\n[Page 66]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 73,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nIf the RST bit is set\nIf the ACK was acceptable then signal the user \"error:\nconnection reset\", drop the segment, enter CLOSED state,\ndelete TCB, and return. Otherwise (no ACK) drop the segment\nand return.\nthird check the security and precedence\nIf the security/compartment in the segment does not exactly\nmatch the security/compartment in the TCB, send a reset\nIf there is an ACK\n<SEQ=SEG.ACK><CTL=RST>\nOtherwise\n<SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>\nIf there is an ACK\nThe precedence in the segment must match the precedence in the\nTCB, if not, send a reset\n<SEQ=SEG.ACK><CTL=RST>\nIf there is no ACK\nIf the precedence in the segment is higher than the precedence\nin the TCB then if allowed by the user and the system raise\nthe precedence in the TCB to that in the segment, if not\nallowed to raise the prec then send a reset.\n<SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>\nIf the precedence in the segment is lower than the precedence\nin the TCB continue.\nIf a reset was sent, discard the segment and return.\nfourth check the SYN bit\nThis step should be reached only if the ACK is ok, or there is\nno ACK, and it the segment did not contain a RST.\nIf the SYN bit is on and the security/compartment and precedence\n[Page 67]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 74,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nare acceptable then, RCV.NXT is set to SEG.SEQ+1, IRS is set to\nSEG.SEQ. SND.UNA should be advanced to equal SEG.ACK (if there\nis an ACK), and any segments on the retransmission queue which\nare thereby acknowledged should be removed.\nIf SND.UNA > ISS (our SYN has been ACKed), change the connection\nstate to ESTABLISHED, form an ACK segment\n<SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>\nand send it. Data or controls which were queued for\ntransmission may be included. If there are other controls or\ntext in the segment then continue processing at the sixth step\nbelow where the URG bit is checked, otherwise return.\nOtherwise enter SYN-RECEIVED, form a SYN,ACK segment\n<SEQ=ISS><ACK=RCV.NXT><CTL=SYN,ACK>\nand send it. If there are other controls or text in the\nsegment, queue them for processing after the ESTABLISHED state\nhas been reached, return.\nfifth, if neither of the SYN or RST bits is set then drop the\nsegment and return.\n[Page 68]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 75,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nOtherwise,\nfirst check sequence number\nSYN-RECEIVED STATE\nESTABLISHED STATE\nFIN-WAIT-1 STATE\nFIN-WAIT-2 STATE\nCLOSE-WAIT STATE\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT STATE\nSegments are processed in sequence. Initial tests on arrival\nare used to discard old duplicates, but further processing is\ndone in SEG.SEQ order. If a segment’s contents straddle the\nboundary between old and new, only the new parts should be\nprocessed.\nThere are four cases for the acceptability test for an incoming\nsegment:\nSegment Receive Test\nLength Window\n------- ------- -------------------------------------------\n0 0 SEG.SEQ = RCV.NXT\n0 >0 RCV.NXT =< SEG.SEQ < RCV.NXT+RCV.WND\n>0 0 not acceptable\n>0 >0 RCV.NXT =< SEG.SEQ < RCV.NXT+RCV.WND\nor RCV.NXT =< SEG.SEQ+SEG.LEN-1 < RCV.NXT+RCV.WND\nIf the RCV.WND is zero, no segments will be acceptable, but\nspecial allowance should be made to accept valid ACKs, URGs and\nRSTs.\nIf an incoming segment is not acceptable, an acknowledgment\nshould be sent in reply (unless the RST bit is set, if so drop\nthe segment and return):\n<SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>\nAfter sending the acknowledgment, drop the unacceptable segment\nand return.\n[Page 69]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 76,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nIn the following it is assumed that the segment is the idealized\nsegment that begins at RCV.NXT and does not exceed the window.\nOne could tailor actual segments to fit this assumption by\ntrimming off any portions that lie outside the window (including\nSYN and FIN), and only processing further if the segment then\nbegins at RCV.NXT. Segments with higher begining sequence\nnumbers may be held for later processing.\nsecond check the RST bit,\nSYN-RECEIVED STATE\nIf the RST bit is set\nIf this connection was initiated with a passive OPEN (i.e.,\ncame from the LISTEN state), then return this connection to\nLISTEN state and return. The user need not be informed. If\nthis connection was initiated with an active OPEN (i.e., came\nfrom SYN-SENT state) then the connection was refused, signal\nthe user \"connection refused\". In either case, all segments\non the retransmission queue should be removed. And in the\nactive OPEN case, enter the CLOSED state and delete the TCB,\nand return.\nESTABLISHED\nFIN-WAIT-1\nFIN-WAIT-2\nCLOSE-WAIT\nIf the RST bit is set then, any outstanding RECEIVEs and SEND\nshould receive \"reset\" responses. All segment queues should be\nflushed. Users should also receive an unsolicited general\n\"connection reset\" signal. Enter the CLOSED state, delete the\nTCB, and return.\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT\nIf the RST bit is set then, enter the CLOSED state, delete the\nTCB, and return.\n[Page 70]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 77,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nthird check security and precedence\nSYN-RECEIVED\nIf the security/compartment and precedence in the segment do not\nexactly match the security/compartment and precedence in the TCB\nthen send a reset, and return.\nESTABLISHED STATE\nIf the security/compartment and precedence in the segment do not\nexactly match the security/compartment and precedence in the TCB\nthen send a reset, any outstanding RECEIVEs and SEND should\nreceive \"reset\" responses. All segment queues should be\nflushed. Users should also receive an unsolicited general\n\"connection reset\" signal. Enter the CLOSED state, delete the\nTCB, and return.\nNote this check is placed following the sequence check to prevent\na segment from an old connection between these ports with a\ndifferent security or precedence from causing an abort of the\ncurrent connection.\nfourth, check the SYN bit,\nSYN-RECEIVED\nESTABLISHED STATE\nFIN-WAIT STATE-1\nFIN-WAIT STATE-2\nCLOSE-WAIT STATE\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT STATE\nIf the SYN is in the window it is an error, send a reset, any\noutstanding RECEIVEs and SEND should receive \"reset\" responses,\nall segment queues should be flushed, the user should also\nreceive an unsolicited general \"connection reset\" signal, enter\nthe CLOSED state, delete the TCB, and return.\nIf the SYN is not in the window this step would not be reached\nand an ack would have been sent in the first step (sequence\nnumber check).\n[Page 71]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 78,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nfifth check the ACK field,\nif the ACK bit is off drop the segment and return\nif the ACK bit is on\nSYN-RECEIVED STATE\nIf SND.UNA =< SEG.ACK =< SND.NXT then enter ESTABLISHED state\nand continue processing.\nIf the segment acknowledgment is not acceptable, form a\nreset segment,\n<SEQ=SEG.ACK><CTL=RST>\nand send it.\nESTABLISHED STATE\nIf SND.UNA < SEG.ACK =< SND.NXT then, set SND.UNA <- SEG.ACK.\nAny segments on the retransmission queue which are thereby\nentirely acknowledged are removed. Users should receive\npositive acknowledgments for buffers which have been SENT and\nfully acknowledged (i.e., SEND buffer should be returned with\n\"ok\" response). If the ACK is a duplicate\n(SEG.ACK < SND.UNA), it can be ignored. If the ACK acks\nsomething not yet sent (SEG.ACK > SND.NXT) then send an ACK,\ndrop the segment, and return.\nIf SND.UNA < SEG.ACK =< SND.NXT, the send window should be\nupdated. If (SND.WL1 < SEG.SEQ or (SND.WL1 = SEG.SEQ and\nSND.WL2 =< SEG.ACK)), set SND.WND <- SEG.WND, set\nSND.WL1 <- SEG.SEQ, and set SND.WL2 <- SEG.ACK.\nNote that SND.WND is an offset from SND.UNA, that SND.WL1\nrecords the sequence number of the last segment used to update\nSND.WND, and that SND.WL2 records the acknowledgment number of\nthe last segment used to update SND.WND. The check here\nprevents using old segments to update the window.\n[Page 72]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 79,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nFIN-WAIT-1 STATE\nIn addition to the processing for the ESTABLISHED state, if\nour FIN is now acknowledged then enter FIN-WAIT-2 and continue\nprocessing in that state.\nFIN-WAIT-2 STATE\nIn addition to the processing for the ESTABLISHED state, if\nthe retransmission queue is empty, the user’s CLOSE can be\nacknowledged (\"ok\") but do not delete the TCB.\nCLOSE-WAIT STATE\nDo the same processing as for the ESTABLISHED state.\nCLOSING STATE\nIn addition to the processing for the ESTABLISHED state, if\nthe ACK acknowledges our FIN then enter the TIME-WAIT state,\notherwise ignore the segment.\nLAST-ACK STATE\nThe only thing that can arrive in this state is an\nacknowledgment of our FIN. If our FIN is now acknowledged,\ndelete the TCB, enter the CLOSED state, and return.\nTIME-WAIT STATE\nThe only thing that can arrive in this state is a\nretransmission of the remote FIN. Acknowledge it, and restart\nthe 2 MSL timeout.\nsixth, check the URG bit,\nESTABLISHED STATE\nFIN-WAIT-1 STATE\nFIN-WAIT-2 STATE\nIf the URG bit is set, RCV.UP <- max(RCV.UP,SEG.UP), and signal\nthe user that the remote side has urgent data if the urgent\npointer (RCV.UP) is in advance of the data consumed. If the\nuser has already been signaled (or is still in the \"urgent\nmode\") for this continuous sequence of urgent data, do not\nsignal the user again.\n[Page 73]",
+      "tables": [],
+      "images": []
+    },
+    {
+      "page_num": 80,
+      "text": "September 1981\nTransmission Control Protocol\nFunctional Specification\nSEGMENT ARRIVES\nCLOSE-WAIT STATE\nCLOSING STATE\nLAST-ACK STATE\nTIME-WAIT\nThis should not occur, since a FIN has been received from the\nremote side. Ignore the URG.\nseventh, process the segment text,\nESTABLISHED STATE\nFIN-WAIT-1 STATE\nFIN-WAIT-2 STATE\nOnce in the ESTABLISHED state, it is possible to deliver segment\ntext to user RECEIVE buffers. Text from segments can be moved\ninto buffers until either the buffer is full or the segment is\nempty. If the segment empties and carries an PUSH flag, then\nthe user is informed, when the buffer is returned, that a PUSH\nhas been received.\nWhen the TCP takes responsibility for delivering the data to the\nuser it must also acknowledge the receipt of the data.\nOnce the TCP takes responsibility for the data it advances\nRCV.NXT over the data accepted, and adjusts RCV.WND as\napporopriate to the current buffer availability. The total of\nRCV.NXT and RCV.WND should not be reduced.\nPlease note the window management suggestions in section 3.7.\nSend an acknowledgment of the form:\n<SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>\nThis acknowledgment should be piggybacked on a segment being\ntransmitted if possible without incurring undue delay.\n[Page 74]",
+      "tables": [],
+      "images": []
+    }
+  ]
+}

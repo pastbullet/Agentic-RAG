@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/classifier.py
+# hypothesis_version: 6.151.9
+
+[0.0, 1.0, 'Manual override', '```', 'candidate_labels', 'confidence', 'content', 'data/out', 'error_handling', 'extract', 'general_description', 'json', 'label', 'label_counts', 'message_format', 'node_id', 'node_labels.json', 'procedure_rule', 'rationale', 'role', 'secondary_hints', 'skipped_by_label', 'skipped_count', 'skipped_node_ids', 'state_machine', 'summary', 'system', 'timer_rule', 'title', 'total_labeled', 'user', 'utf-8', 'v1.1-standalone-fsm', '{', '}']

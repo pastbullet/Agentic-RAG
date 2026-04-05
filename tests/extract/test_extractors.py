@@ -78,6 +78,134 @@ async def test_state_machine_extractor_returns_empty_model_on_invalid_json():
 
 
 @pytest.mark.asyncio
+async def test_state_machine_extractor_backfills_name_for_explicit_empty_fsm():
+    llm = FakeLLM(json.dumps({"name": "", "states": [], "transitions": []}))
+    result = await StateMachineExtractor(llm).extract(
+        node_id="n-empty",
+        text="This is a numbered check, not a standalone FSM.",
+        title="Third Check for SYN",
+        source_pages=[8],
+    )
+
+    assert result.name == "Third Check for SYN"
+    assert result.states == []
+    assert result.transitions == []
+    assert result.source_pages == [8]
+
+
+@pytest.mark.asyncio
+async def test_state_machine_extractor_coerces_null_condition_to_empty_string():
+    llm = FakeLLM(
+        json.dumps(
+            {
+                "name": "TCP STATUS Call",
+                "states": [
+                    {"name": "ESTABLISHED", "description": "connected", "is_initial": False},
+                    {"name": "CLOSED", "description": "closed", "is_final": True},
+                ],
+                "transitions": [
+                    {
+                        "from_state": "ESTABLISHED",
+                        "to_state": "ESTABLISHED",
+                        "event": "STATUS call",
+                        "condition": None,
+                        "actions": ["Return connection status"],
+                    }
+                ],
+            }
+        )
+    )
+
+    result = await StateMachineExtractor(llm).extract(
+        node_id="n3",
+        text="status call state machine text",
+        title="STATUS Call",
+        source_pages=[69, 70],
+    )
+
+    assert result.name == "TCP STATUS Call"
+    assert len(result.states) == 2
+    assert len(result.transitions) == 1
+    assert result.transitions[0].condition == ""
+    assert result.source_pages == [69, 70]
+
+
+@pytest.mark.asyncio
+async def test_state_machine_extractor_normalizes_alias_fields_for_states_and_transitions():
+    llm = FakeLLM(
+        json.dumps(
+            {
+                "name": "BFD State Machine",
+                "states": [
+                    {"id": "Down", "description": "Session down", "initial": True},
+                    {"label": "Init", "details": "Session initializing"},
+                    {"title": "Up", "summary": "Session established"},
+                ],
+                "transitions": [
+                    {
+                        "from": "Down",
+                        "to": "Init",
+                        "trigger": "receive remote Down",
+                        "action": "start transmit timer",
+                    },
+                    {
+                        "source": "Init",
+                        "target": "Up",
+                        "when": "receive remote Init",
+                        "effects": ["set session up"],
+                    },
+                ],
+            }
+        )
+    )
+
+    result = await StateMachineExtractor(llm).extract(
+        node_id="n-alias",
+        text="Alias-shaped state machine payload",
+        title="6.2 BFD State Machine",
+        source_pages=[10, 11],
+    )
+
+    assert result.name == "BFD State Machine"
+    assert [state.name for state in result.states] == ["Down", "Init", "Up"]
+    assert result.states[0].is_initial is True
+    assert result.transitions[0].from_state == "Down"
+    assert result.transitions[0].to_state == "Init"
+    assert result.transitions[0].event == "receive remote Down"
+    assert result.transitions[0].actions == ["start transmit timer"]
+    assert result.transitions[1].from_state == "Init"
+    assert result.transitions[1].to_state == "Up"
+    assert result.transitions[1].event == "receive remote Init"
+    assert result.transitions[1].actions == ["set session up"]
+    assert result.source_pages == [10, 11]
+
+
+@pytest.mark.asyncio
+async def test_state_machine_extractor_coerces_non_standalone_payload_to_empty():
+    llm = FakeLLM(
+        json.dumps(
+            {
+                "name": "Copied node metadata",
+                "states": [{"id": "0019", "title": "6.3 Demultiplexing and the Discriminator Fields"}],
+                "transitions": [],
+            }
+        )
+    )
+
+    result = await StateMachineExtractor(llm).extract(
+        node_id="0019",
+        text="This section discusses discriminators and packet demultiplexing.",
+        title="6.3 Demultiplexing and the Discriminator Fields",
+        source_pages=[16],
+    )
+
+    assert result.name == "6.3 Demultiplexing and the Discriminator Fields"
+    assert result.states == []
+    assert result.transitions == []
+    assert result.source_pages == [16]
+
+
+@pytest.mark.asyncio
 async def test_message_extractor_parses_fields_and_source_pages():
     llm = FakeLLM(
         json.dumps(

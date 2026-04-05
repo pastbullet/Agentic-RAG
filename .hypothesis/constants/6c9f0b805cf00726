@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/run_extract_pipeline.py
+# hypothesis_version: 6.151.9
+
+[',', '--doc', '--enable-hitl', '--force', '--model', '--pdf', '--show-message-irs', '--stages', '=', 'Ingest Summary', 'MessageIR Summary', 'Pipeline Stages', '__main__', 'all', 'blocked', 'classify', 'code', 'codegen', 'diagnostics', 'draft', 'extract', 'failure_count', 'merge', 'message_count', 'message_ir.json', 'message_ir_count', 'message_ir_path', 'normalization_status', 'process', 'ready', 'schema_path', 'state_machine_count', 'store_true', 'success_count', 'syntax_ok', 'test_results', 'utf-8', 'verify', 'verify_report_path', 'warnings']

@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/state_context_alignment.py
+# hypothesis_version: 6.151.9
+
+[0.0, 'cancel_timer', 'ctx', 'error', 'guard_ctx', 'guard_timer', 'set_state', 'start_timer', 'state', 'timer', 'timer_action', 'update_field', 'warning']

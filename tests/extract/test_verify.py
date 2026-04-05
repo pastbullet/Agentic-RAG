@@ -186,6 +186,8 @@ def test_verify_generated_code_checks_structural_completeness(tmp_path: Path):
 
     assert report.structural_checks
     assert all(item["passed"] for item in report.structural_checks)
+    assert any(item["check"] == "struct:bfd_context" for item in report.structural_checks)
+    assert any(item["check"] == "function:bfd_context_init" for item in report.structural_checks)
     assert report.test_results[0]["test_name"] == "test_roundtrip_stub"
 
 
@@ -197,6 +199,8 @@ def test_verify_generated_code_infers_expected_symbols_for_standalone_verify(tmp
     report = verify_generated_code(str(tmp_path / "generated"), schema, "rfc5880-BFD.pdf")
 
     assert inferred
+    assert any(item["symbol"] == "bfd_context" for item in inferred)
+    assert any(item["symbol"] == "bfd_context_init" for item in inferred)
     assert report.structural_checks
     assert all(item["passed"] for item in report.structural_checks)
     assert (tmp_path / "generated" / "test_roundtrip.c").exists()
@@ -219,3 +223,54 @@ def test_verify_generated_code_coverage_summary_mentions_component_counts(tmp_pa
     assert "messages=1" in report.coverage_summary
     assert "syntax_checked=" in report.coverage_summary
     assert "structural=" in report.coverage_summary
+
+
+def test_verify_generated_code_counts_duplicate_named_state_machines(tmp_path: Path):
+    schema = ProtocolSchema(
+        protocol_name="rfc793-TCP",
+        source_document="rfc793-TCP.pdf",
+        state_machines=[
+            ProtocolStateMachine(
+                name="TCP Timeout Handling",
+                states=[
+                    ProtocolState(name="ANY", is_initial=True),
+                    ProtocolState(name="CLOSED", is_final=True),
+                ],
+                transitions=[
+                    ProtocolTransition(
+                        from_state="ANY",
+                        to_state="CLOSED",
+                        event="User timeout expires",
+                    )
+                ],
+            ),
+            ProtocolStateMachine(
+                name="TCP Timeout Handling",
+                states=[
+                    ProtocolState(name="TIME-WAIT", is_initial=True),
+                    ProtocolState(name="CLOSED", is_final=True),
+                ],
+                transitions=[
+                    ProtocolTransition(
+                        from_state="TIME-WAIT",
+                        to_state="CLOSED",
+                        event="Time-wait timeout expires",
+                    )
+                ],
+            ),
+        ],
+    )
+
+    codegen_result = generate_code(schema, str(tmp_path / "generated"))
+    report = verify_generated_code(
+        str(tmp_path / "generated"),
+        schema,
+        "rfc793-TCP.pdf",
+        codegen_result.expected_symbols,
+        codegen_result.generated_msg_headers,
+        codegen_result.generated_msgs,
+    )
+
+    assert "state_machines=2" in report.coverage_summary
+    assert report.structural_checks
+    assert all(item["passed"] for item in report.structural_checks)

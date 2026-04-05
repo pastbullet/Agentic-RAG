@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ DEFAULT_LABEL_PRIORITY: list[str] = [
     "general_description",
 ]
 
-PROMPT_VERSION = "v1.0"
+PROMPT_VERSION = "v1.4-standalone-fsm-segment-reclassification"
 _VALID_LABELS = set(DEFAULT_LABEL_PRIORITY)
 
 _CLASSIFIER_SYSTEM_PROMPT = """You classify communication-protocol document nodes.
@@ -40,16 +41,73 @@ Return JSON only with this shape:
 }
 
 Rules:
-- state_machine: explicit states, events, transitions, state change conditions.
+- Use the node title and node text as primary evidence. Section summaries may be noisy or
+  may mention neighboring content; do not classify as state_machine based on summary alone.
+- state_machine: a COMPLETE, standalone state machine with MULTIPLE persistent named states
+  and MULTIPLE transitions. The states must appear as stable named entities throughout the
+  text. A single if-then check, one numbered processing step, or a local clause does NOT
+  qualify; classify those as procedure_rule instead.
 - message_format: packet/frame/header/TLV/field layout, bit width, encoding.
-- procedure_rule: ordered processing behavior without a full state machine.
+- procedure_rule: ordered processing behavior, numbered checks, event handling steps,
+  or any behavioral rule that describes what to do in a specific case. Use this when
+  the text describes processing for ONE event type or ONE condition check.
 - timer_rule: timeout, interval, detection time, retry period, liveness timing.
 - error_handling: invalid input, discard, exception, recovery, fault behavior.
 - general_description: background, definitions, motivation, overview, non-normative text.
-- If the text fits "in state X, on event Y, do Z and move to W", prefer state_machine over procedure_rule.
+- Prefer state_machine ONLY when the text defines a COMPLETE standalone state machine:
+  multiple named persistent states, multiple events or transitions, and states reused as
+  stable entities across the text. A single "in state X, on event Y, do Z" clause should
+  usually be procedure_rule.
+- The following are usually NOT state_machine even if they mention state names:
+  overview/introduction/design sections, security considerations, references, state-variable
+  definitions, packet reception/validation procedures, administrative control rules,
+  enabling/disabling features, demultiplexing rules, and backward-compatibility appendices.
 - Respect the provided priority order for tie breaking.
 - Put non-primary relevant labels into secondary_hints.
 """
+
+_GENERAL_DESCRIPTION_TITLE_HINTS = (
+    "overview",
+    "introduction",
+    "security considerations",
+    "references",
+    "reference",
+    "conventions",
+    "terminology",
+    "background",
+    "design",
+    "state variables",
+    "non-normative",
+)
+
+_PROCEDURE_TITLE_HINTS = (
+    "reception of",
+    "processing",
+    "detecting failures",
+    "administrative control",
+    "forwarding plane reset",
+    "holding down sessions",
+    "enabling or disabling",
+    "demultiplexing",
+    "discriminator fields",
+    "check the",
+    "check for",
+)
+
+_SANITY_DOWNGRADE_PREFIX = "sanity_downgrade:"
+_CALL_INVOCATION_HINTS = (
+    "user call",
+    "the user issues",
+    "user issues",
+    "application requests",
+    "user requests",
+    "request to",
+)
+_NUMBERED_CHECK_TITLE_RE = re.compile(
+    r"^\s*\d+(?:\.\d+)*\s+"
+    r"(?:(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+)?"
+    r"check\b"
+)
 
 
 def resolve_priority(candidate_labels: list[str], label_priority: list[str]) -> str:
@@ -153,6 +211,67 @@ def coerce_node_label(
     )
 
 
+def _apply_state_machine_sanity_filter(
+    label: NodeSemanticLabel,
+    title: str,
+    summary: str,
+    text_snippet: str,
+) -> NodeSemanticLabel:
+    if label.label != "state_machine":
+        return label
+
+    title_lower = (title or "").strip().lower()
+    summary_lower = (summary or "").strip().lower()
+    text_lower = (text_snippet or "").strip().lower()
+    combined = " ".join(part for part in (title_lower, summary_lower, text_lower[:2000]) if part)
+    existing_hints = [
+        hint for hint in label.secondary_hints if isinstance(hint, str) and hint.strip()
+    ]
+
+    def _downgrade(target_label: str, reason: str, message: str) -> NodeSemanticLabel:
+        marker = f"{_SANITY_DOWNGRADE_PREFIX}{reason}"
+        hints = [*existing_hints]
+        if marker not in hints:
+            hints.append(marker)
+        return label.model_copy(
+            update={
+                "label": target_label,
+                "rationale": f"Downgraded from state_machine ({reason}): {message}",
+                "secondary_hints": hints,
+            }
+        )
+
+    if any(hint in title_lower for hint in _GENERAL_DESCRIPTION_TITLE_HINTS) or "non-normative" in combined:
+        return _downgrade(
+            "general_description",
+            "meta_section",
+            f"'{title or '<untitled>'}' is a meta/descriptive section, not a standalone FSM.",
+        )
+
+    if any(hint in title_lower for hint in _PROCEDURE_TITLE_HINTS):
+        return _downgrade(
+            "procedure_rule",
+            "numbered_check",
+            f"'{title or '<untitled>'}' matches a local check/procedure title pattern rather than a standalone FSM.",
+        )
+
+    if _NUMBERED_CHECK_TITLE_RE.match(title_lower):
+        return _downgrade(
+            "procedure_rule",
+            "numbered_check",
+            f"'{title or '<untitled>'}' is a numbered check section rather than a standalone FSM.",
+        )
+
+    if title_lower.endswith(" call") and any(hint in combined for hint in _CALL_INVOCATION_HINTS):
+        return _downgrade(
+            "procedure_rule",
+            "call_procedure",
+            f"'{title or '<untitled>'}' describes an invocation-style procedure rather than a standalone FSM.",
+        )
+
+    return label
+
+
 async def classify_node(
     node_id: str,
     title: str,
@@ -165,7 +284,6 @@ async def classify_node(
     user_prompt = (
         f"Node ID: {node_id}\n"
         f"Title: {title or '<empty>'}\n"
-        f"Summary: {summary or '<empty>'}\n"
         f"Priority: {' > '.join(label_priority)}\n"
         f"Text:\n{text_snippet[:6000]}"
     )
@@ -177,7 +295,13 @@ async def classify_node(
         [],
     )
     payload = _extract_json_payload(response.text or "")
-    return coerce_node_label(node_id=node_id, payload=payload, label_priority=label_priority)
+    label = coerce_node_label(node_id=node_id, payload=payload, label_priority=label_priority)
+    return _apply_state_machine_sanity_filter(
+        label=label,
+        title=title,
+        summary=summary,
+        text_snippet=text_snippet,
+    )
 
 
 async def classify_all_nodes(
@@ -315,11 +439,19 @@ def summarize_labels(labels: dict[str, NodeSemanticLabel]) -> dict[str, Any]:
     """Build summary statistics for classified labels."""
     label_counts = {label: 0 for label in DEFAULT_LABEL_PRIORITY}
     skipped_node_ids: list[str] = []
+    sanity_downgrade_count = 0
+    sanity_downgrade_by_reason: dict[str, int] = {}
 
     for node_id, label in labels.items():
         label_counts[label.label] = label_counts.get(label.label, 0) + 1
         if label.label == "general_description":
             skipped_node_ids.append(node_id)
+        for hint in label.secondary_hints:
+            if not isinstance(hint, str) or not hint.startswith(_SANITY_DOWNGRADE_PREFIX):
+                continue
+            sanity_downgrade_count += 1
+            reason = hint.split(":", 1)[1] if ":" in hint else "unknown"
+            sanity_downgrade_by_reason[reason] = sanity_downgrade_by_reason.get(reason, 0) + 1
 
     skipped_count = len(skipped_node_ids)
     return {
@@ -328,6 +460,8 @@ def summarize_labels(labels: dict[str, NodeSemanticLabel]) -> dict[str, Any]:
         "skipped_count": skipped_count,
         "skipped_node_ids": skipped_node_ids,
         "skipped_by_label": {"general_description": skipped_count},
+        "state_machine_sanity_downgrade_count": sanity_downgrade_count,
+        "state_machine_sanity_downgrade_by_reason": sanity_downgrade_by_reason,
     }
 
 

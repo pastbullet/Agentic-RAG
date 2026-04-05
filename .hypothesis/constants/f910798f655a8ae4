@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/state_context.py
+# hypothesis_version: 6.151.9
+
+['CLOSED', 'Connection State', 'IDLE', 'Receive Window', 'Retransmission Timer', 'Send Next Sequence', 'Send Queue', 'Send Window', 'Session State', '[\\s\\-]+', '_', '_+', 'and', 'association', 'connection', 'connection_state', 'derived', 'enum', 'error', 'false', 'global', 'in', 'invalid_scope', 'invalid_state_field', 'kind', 'missing_state_field', 'not', 'null', 'or', 'queue', 'recv_next_seq', 'recv_window', 'retransmission_timer', 'segment_ref', 'semantic_role', 'send_next_seq', 'send_queue', 'send_window', 'session', 'session_state', 'state', 'state_field_inferred', 'transaction', 'true', 'u16', 'u32', 'warning']

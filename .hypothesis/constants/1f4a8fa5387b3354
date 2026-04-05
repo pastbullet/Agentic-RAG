@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/tools/registry.py
+# hypothesis_version: 6.151.9
+
+[210, 'FC-LS.pdf', 'chunks_dir', 'content_*.json', 'content_dir', 'data/raw/FC-LS.pdf', 'error', 'manifest.json', 'part_*.json', 'pdf_path', 'rfc5880-BFD.pdf', 'total_pages', 'utf-8']

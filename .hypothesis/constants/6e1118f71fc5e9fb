@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/extractors/state_machine.py
+# hypothesis_version: 6.151.9
+
+['action', 'actions', 'condition', 'description', 'details', 'effect', 'effects', 'event', 'extract', 'final', 'from', 'from_state', 'guard', 'id', 'initial', 'input', 'is_final', 'is_initial', 'label', 'name', 'on', 'source', 'source_pages', 'states', 'summary', 'target', 'terminal', 'title', 'to', 'to_state', 'transitions', 'trigger', 'unspecified_event', 'when']

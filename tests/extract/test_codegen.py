@@ -10,6 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from src.extract import codegen as codegen_module
+from src.extract.fsm_ir import lower_state_machine_to_fsm_ir
 from src.extract.codegen import (
     _build_expected_symbols,
     _map_field_type,
@@ -21,12 +22,14 @@ from src.extract.codegen import (
     generate_code,
 )
 from src.models import (
+    NormalizationStatus,
     ProtocolField,
     ProtocolMessage,
     ProtocolSchema,
     ProtocolState,
     ProtocolStateMachine,
     ProtocolTransition,
+    TypedGuard,
 )
 
 
@@ -264,12 +267,23 @@ def test_generate_code_renders_synthetic_bfd_schema(tmp_path: Path):
 
     result = generate_code(schema, str(tmp_path))
 
-    assert len(result.files) == 5
+    assert len(result.files) == 7
+    context_header_text = (tmp_path / "bfd_context.h").read_text(encoding="utf-8")
+    main_header_text = (tmp_path / "rfc5880-BFD.h").read_text(encoding="utf-8")
     header_text = (tmp_path / "bfd_msg_bfd_control_packet_mandatory_section.h").read_text(encoding="utf-8")
     source_text = (tmp_path / "bfd_sm_bfd_session.c").read_text(encoding="utf-8")
+    assert "typedef struct bfd_context" in context_header_text
+    assert "void bfd_context_init(bfd_context *ctx);" in context_header_text
+    assert "typedef enum bfd_ctx_state" in context_header_text
+    assert '#include "bfd_context.h"' in main_header_text
     assert "typedef struct bfd_bfd_control_packet_mandatory_section" in header_text
     assert "bfd_bfd_control_packet_mandatory_section_pack" in header_text
+    assert "ctx->detection.active = true;" in source_text
     assert "return bfd_bfd_session_STATE_UP;" in source_text
+    assert result.typed_action_count == 1
+    assert result.generated_action_count == 1
+    assert result.degraded_action_count == 0
+    assert result.action_codegen_ratio == 1.0
 
 
 def test_generate_code_raises_when_templates_are_missing(tmp_path: Path, monkeypatch):
@@ -278,3 +292,52 @@ def test_generate_code_raises_when_templates_are_missing(tmp_path: Path, monkeyp
 
     with pytest.raises(FileNotFoundError):
         generate_code(schema, str(tmp_path / "generated"))
+
+
+def test_generate_code_prefers_existing_fsm_irs(tmp_path: Path, monkeypatch):
+    state_machine = ProtocolStateMachine(
+        name="BFD Session",
+        states=[
+            ProtocolState(name="Down", is_initial=True),
+            ProtocolState(name="Up", is_final=True),
+        ],
+        transitions=[
+            ProtocolTransition(
+                from_state="Down",
+                to_state="Up",
+                event="Receive Control Packet",
+                condition="complex natural language guard",
+                actions=["do something raw"],
+            )
+        ],
+    )
+    refined_fsm_ir = lower_state_machine_to_fsm_ir(state_machine, "rfc5880-BFD")
+    refined_fsm_ir.blocks[0].branches[0].guard_raw = "Always"
+    refined_fsm_ir.blocks[0].branches[0].guard_typed = TypedGuard(
+        kind="always",
+        ref_source="const",
+        description="Always",
+    )
+    refined_fsm_ir.blocks[0].branches[0].readiness = NormalizationStatus.DEGRADED_READY
+
+    schema = ProtocolSchema(
+        protocol_name="rfc5880-BFD",
+        source_document="rfc5880-BFD.pdf",
+        state_machines=[state_machine],
+        fsm_irs=[refined_fsm_ir],
+        messages=[
+            ProtocolMessage(
+                name="BFD Control Packet",
+                fields=[ProtocolField(name="Version", size_bits=8)],
+            )
+        ],
+    )
+
+    def fail_if_relowered(_schema):
+        raise AssertionError("lower_all_state_machines should not be called when schema.fsm_irs already exists")
+
+    monkeypatch.setattr(codegen_module, "lower_all_state_machines", fail_if_relowered)
+
+    result = generate_code(schema, str(tmp_path))
+
+    assert result.files

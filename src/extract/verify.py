@@ -91,6 +91,17 @@ def _infer_expected_symbols_from_generated_files(
     generated_path = Path(generated_dir)
     prefix = _protocol_prefix(schema.protocol_name)
     symbols: list[dict] = []
+    context_header = generated_path / f"{prefix}_context.h"
+    if context_header.exists():
+        symbols.extend(
+            [
+                {"symbol": f"{prefix}_context", "kind": "struct", "source": f"{prefix}_context"},
+                {"symbol": f"{prefix}_context_init", "kind": "function", "source": f"{prefix}_context"},
+            ]
+        )
+        context_text = context_header.read_text(encoding="utf-8")
+        if f"typedef enum {prefix}_ctx_state" in context_text:
+            symbols.append({"symbol": f"{prefix}_ctx_state", "kind": "enum", "source": f"{prefix}_context"})
     for header in sorted(generated_path.glob(f"{prefix}_sm_*.h")):
         stem = header.stem
         component = stem[len(f"{prefix}_sm_"):]

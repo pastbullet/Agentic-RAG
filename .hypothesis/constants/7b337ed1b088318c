@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/fsm_ir.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.3, '!=', '-', '.', '=', '==', 'Always', 'FSM_ACTION_UNPARSED', 'FSM_GUARD_UNPARSED', '[^a-z0-9]+', '\\s*```$', '^(?:0|[1-9][0-9]*)$', '^0[xX][0-9A-Fa-f]+$', '^```(?:json)?\\s*', '_', '```', 'actions', 'always', 'branches', 'cancel_timer', 'const', 'content', 'context_', 'context_field_eq', 'context_field_ne', 'ctx', 'description', 'emit_message', 'event', 'false', 'field_comparison', 'field_ref', 'flag_check', 'from_state', 'fsm_name', 'guard', 'hint', 'kind', 'known_message_names', 'known_states', 'known_timers', 'llm_refined_guard', 'msg', 'next_state', 'operator', 'raw_actions', 'raw_guard', 'ref_source', 'role', 'set_state', 'start_timer', 'system', 'target', 'text', 'timer', 'timer_fired', 'true', 'unknown', 'update_field', 'user', 'value', 'warning']

@@ -15,7 +15,6 @@ from src.models import (
 )
 
 _SUPPORTED_SCOPES = {"connection", "session", "association", "transaction", "global"}
-_REQUIRED_ROLES = ("state", "send_next_seq", "recv_next_seq", "send_window", "recv_window")
 _TOKEN_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 _RESERVED_TOKENS = {"and", "or", "not", "in", "true", "false", "null"}
 
@@ -59,9 +58,24 @@ def _infer_rule_dependencies(expression: str, known_fields: set[str], known_role
     return deps
 
 
-def normalize_state_context_ir(context: StateContextIR) -> StateContextIR:
+def normalize_state_context_ir(
+    context: StateContextIR,
+    *,
+    required_refs: set[str] | None = None,
+) -> StateContextIR:
+    """Normalize a StateContextIR and compute readiness.
+
+    Args:
+        context: The raw StateContextIR to normalize.
+        required_refs: Optional set of canonical field/timer names that the
+            FSM consumer actually references.  When provided, readiness is
+            evaluated against this consumer-driven set instead of any
+            hard-coded role list.  When *None*, any context with a valid
+            state_field and at least one field is considered READY (no
+            TCP-specific role requirement).
+    """
     normalized = context.model_copy(deep=True)
-    diagnostics: list[IRDiagnostic] = []
+    diagnostics: list[IRDiagnostic] = list(normalized.diagnostics)
     degraded = False
     blocked = False
 
@@ -83,7 +97,8 @@ def normalize_state_context_ir(context: StateContextIR) -> StateContextIR:
         role = _normalize_atom(field.semantic_role)
         normalized_field = field.model_copy(update={"semantic_role": role}, deep=True)
         normalized.fields.append(normalized_field)
-        field_by_name[normalized_field.canonical_name] = normalized_field
+        field_name = _normalize_atom(normalized_field.canonical_name) or normalized_field.canonical_name
+        field_by_name[field_name] = normalized_field
         if role:
             if role in field_by_role:
                 diagnostics.append(
@@ -97,20 +112,32 @@ def normalize_state_context_ir(context: StateContextIR) -> StateContextIR:
             else:
                 field_by_role[role] = normalized_field
 
-    missing_roles = [role for role in _REQUIRED_ROLES if role not in field_by_role]
-    if missing_roles:
-        diagnostics.append(
-            _make_diag(
-                "error",
-                "missing_context_roles",
-                f"Missing required context roles: {', '.join(missing_roles)}.",
-            )
-        )
-        blocked = True
+    # Consumer-driven coverage check: verify that all refs the FSM actually
+    # needs are satisfied, rather than requiring a fixed TCP-centric role set.
+    timer_names = {_normalize_atom(t.canonical_name) for t in context.timers}
+    all_slots = set(field_by_name) | set(field_by_role) | timer_names
+    if required_refs is not None:
+        normalized_required_refs = {
+            _normalize_atom(ref) or ref
+            for ref in required_refs
+            if isinstance(ref, str) and ref.strip()
+        }
+        missing_refs = sorted(normalized_required_refs - all_slots)
+        if missing_refs:
+            diagnostics.append(
+                _make_diag(
+                    "warning",
+                    "missing_consumer_refs",
+                    f"FSM references slots not declared in context: {', '.join(missing_refs)}.",
+                )
+                )
+            degraded = True
 
-    state_field = normalized.state_field.strip() if isinstance(normalized.state_field, str) else None
+    state_field = _normalize_atom(normalized.state_field) if isinstance(normalized.state_field, str) else None
+    normalized.state_field = state_field
     if state_field:
-        if state_field not in field_by_name and state_field not in field_by_role:
+        state_field_ref = field_by_name.get(state_field)
+        if state_field_ref is None:
             diagnostics.append(
                 _make_diag(
                     "error",
@@ -119,7 +146,7 @@ def normalize_state_context_ir(context: StateContextIR) -> StateContextIR:
                 )
             )
             blocked = True
-        elif state_field in field_by_role and field_by_role[state_field].semantic_role != "state":
+        elif state_field_ref.semantic_role != "state":
             diagnostics.append(
                 _make_diag(
                     "error",
@@ -158,15 +185,6 @@ def normalize_state_context_ir(context: StateContextIR) -> StateContextIR:
                 deep=True,
             )
         )
-    if not normalized.timers:
-        diagnostics.append(
-            _make_diag(
-                "warning",
-                "missing_timer_context",
-                "No timer metadata was provided for this state context.",
-            )
-        )
-        degraded = True
 
     normalized.resources = []
     for resource in context.resources:
@@ -176,15 +194,6 @@ def normalize_state_context_ir(context: StateContextIR) -> StateContextIR:
                 deep=True,
             )
         )
-    if not normalized.resources:
-        diagnostics.append(
-            _make_diag(
-                "warning",
-                "missing_resource_context",
-                "No resource metadata was provided for this state context.",
-            )
-        )
-        degraded = True
 
     known_fields = set(field_by_name) | set(field_by_role)
     normalized.invariants = []

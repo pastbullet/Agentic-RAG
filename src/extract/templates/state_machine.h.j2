@@ -3,6 +3,7 @@
 #define {{ include_guard }}
 
 #include <stdint.h>
+#include "{{ context_header_name }}"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +21,7 @@ typedef enum {{ event_enum }} {
 {% endfor -%}
 } {{ event_enum }};
 
-{{ state_enum }} {{ function_name }}({{ state_enum }} current_state, {{ event_enum }} event);
+{{ state_enum }} {{ function_name }}({{ state_enum }} current_state, {{ event_enum }} event, {{ context_struct_name }} *ctx);
 
 #ifdef __cplusplus
 }

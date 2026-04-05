@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/extract/classifier.py
+# hypothesis_version: 6.151.9
+
+[0.0, 1.0, 2000, 'Manual override', '```', 'background', 'candidate_labels', 'confidence', 'content', 'conventions', 'data/out', 'demultiplexing', 'design', 'detecting failures', 'discriminator fields', 'error_handling', 'extract', 'general_description', 'introduction', 'json', 'label', 'label_counts', 'message_format', 'node_id', 'node_labels.json', 'non-normative', 'overview', 'procedure_rule', 'processing', 'rationale', 'reception of', 'reference', 'references', 'role', 'secondary_hints', 'skipped_by_label', 'skipped_count', 'skipped_node_ids', 'state variables', 'state_machine', 'summary', 'system', 'terminology', 'timer_rule', 'title', 'total_labeled', 'user', 'utf-8', '{', '}']

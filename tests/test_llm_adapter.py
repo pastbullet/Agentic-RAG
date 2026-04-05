@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -125,3 +127,153 @@ class TestLLMAdapterInit:
                     [{"role": "user", "content": "hi"}], []
                 )
             )
+
+
+class TestJsonObjectMode:
+    def test_should_request_structured_output_for_json_only_prompt(self):
+        messages = [
+            {"role": "system", "content": "Return JSON only with this shape:\n{}"},
+            {"role": "user", "content": "hello"},
+        ]
+        assert LLMAdapter._should_use_structured_output(messages, []) is True
+
+    def test_should_not_request_structured_output_when_tools_present(self):
+        messages = [
+            {"role": "system", "content": "Return JSON only with this shape:\n{}"},
+            {"role": "user", "content": "hello"},
+        ]
+        tools = [{"type": "function", "function": {"name": "noop", "parameters": {"type": "object"}}}]
+        assert LLMAdapter._should_use_structured_output(messages, tools) is False
+
+    def test_infers_schema_from_json_example(self):
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Return JSON only with this shape:\n"
+                    '{"label":"state_machine","candidate_labels":["..."],"confidence":0.0,"secondary_hints":["..."]}'
+                ),
+            },
+            {"role": "user", "content": "hello"},
+        ]
+
+        schema = LLMAdapter._structured_output_schema(messages)
+
+        assert schema["type"] == "object"
+        assert schema["properties"]["label"]["type"] == "string"
+        assert schema["properties"]["candidate_labels"]["type"] == "array"
+        assert schema["properties"]["confidence"]["type"] == "number"
+
+    def test_openai_structured_output_prefers_forced_tool(self):
+        class FakeCreate:
+            def __init__(self):
+                self.calls: list[dict] = []
+
+            async def __call__(self, **kwargs):
+                self.calls.append(kwargs)
+                tool_call = SimpleNamespace(
+                    id="call_1",
+                    function=SimpleNamespace(
+                        name="emit_structured_response",
+                        arguments='{"ok": true}',
+                    ),
+                )
+                message = SimpleNamespace(content=None, tool_calls=[tool_call])
+                choice = SimpleNamespace(message=message)
+                usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1)
+                return SimpleNamespace(choices=[choice], usage=usage)
+
+        fake_create = FakeCreate()
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=fake_create)
+            )
+        )
+        adapter = LLMAdapter(provider="openai", model="gpt-4o")
+        adapter._client = fake_client
+        messages = [
+            {"role": "system", "content": 'Return JSON only with this shape:\n{"ok": true}'},
+            {"role": "user", "content": "hello"},
+        ]
+
+        response = asyncio.run(adapter.chat_with_tools(messages, []))
+
+        assert response.text == '{"ok": true}'
+        assert len(fake_create.calls) == 1
+        assert "tools" in fake_create.calls[0]
+        assert fake_create.calls[0]["tool_choice"] == {
+            "type": "function",
+            "function": {"name": "emit_structured_response"},
+        }
+
+    def test_openai_structured_output_falls_back_to_json_schema(self):
+        class FakeCreate:
+            def __init__(self):
+                self.calls: list[dict] = []
+
+            async def __call__(self, **kwargs):
+                self.calls.append(kwargs)
+                if "tools" in kwargs:
+                    raise RuntimeError("tool forcing unsupported")
+                message = SimpleNamespace(content='{"ok": true}', tool_calls=None)
+                choice = SimpleNamespace(message=message)
+                usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1)
+                return SimpleNamespace(choices=[choice], usage=usage)
+
+        fake_create = FakeCreate()
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=fake_create)
+            )
+        )
+        adapter = LLMAdapter(provider="openai", model="gpt-4o")
+        adapter._client = fake_client
+        messages = [
+            {"role": "system", "content": 'Return JSON only with this shape:\n{"ok": true}'},
+            {"role": "user", "content": "hello"},
+        ]
+
+        response = asyncio.run(adapter.chat_with_tools(messages, []))
+
+        assert response.text == '{"ok": true}'
+        assert len(fake_create.calls) == 2
+        assert fake_create.calls[1]["response_format"]["type"] == "json_schema"
+
+    def test_openai_structured_output_falls_back_to_json_object(self):
+        class FakeCreate:
+            def __init__(self):
+                self.calls: list[dict] = []
+
+            async def __call__(self, **kwargs):
+                self.calls.append(kwargs)
+                if "tools" in kwargs:
+                    raise RuntimeError("tool forcing unsupported")
+                if kwargs.get("response_format", {}).get("type") == "json_schema":
+                    raise RuntimeError("json schema unsupported")
+                message = SimpleNamespace(content='{"ok": true}', tool_calls=None)
+                choice = SimpleNamespace(message=message)
+                usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1)
+                return SimpleNamespace(choices=[choice], usage=usage)
+
+        fake_create = FakeCreate()
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=fake_create)
+            )
+        )
+        adapter = LLMAdapter(provider="openai", model="gpt-4o")
+        adapter._client = fake_client
+        messages = [
+            {"role": "system", "content": 'Return JSON only with this shape:\n{"ok": true}'},
+            {"role": "user", "content": "hello"},
+        ]
+
+        response = asyncio.run(adapter.chat_with_tools(messages, []))
+
+        assert response.text == '{"ok": true}'
+        assert len(fake_create.calls) == 3
+        assert fake_create.calls[2]["response_format"] == {"type": "json_object"}
+
+    def test_openai_response_shape_validation_rejects_plain_text(self):
+        with pytest.raises(RuntimeError, match="non-ChatCompletion payload"):
+            LLMAdapter._validate_openai_response_shape("<html>gateway</html>")

@@ -1,0 +1,4 @@
+# file: /Users/zwy/毕设/Kiro/src/models.py
+# hypothesis_version: 6.151.9
+
+[0.0, 1.0, 'always', 'blocked', 'cancel_timer', 'const', 'context_field_eq', 'context_field_ne', 'ctx', 'degraded_ready', 'document_clue', 'draft', 'emit_message', 'error', 'error_handling', 'event_field_eq', 'flag_check', 'fsm_ref', 'general_description', 'global', 'manual_patch', 'message_family', 'message_format', 'message_ir_v1', 'msg', 'opaque', 'opaque_handle', 'procedure_rule', 'ready', 'set_state', 'start_timer', 'state_machine', 'timer', 'timer_fired', 'timer_rule', 'unknown', 'update_field', 'warning']

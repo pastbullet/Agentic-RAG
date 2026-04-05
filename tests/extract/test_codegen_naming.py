@@ -14,7 +14,7 @@ from src.extract.codegen import (
     standardize_msg_name,
     standardize_sm_name,
 )
-from src.models import ProtocolField, ProtocolMessage, ProtocolSchema, ProtocolState, ProtocolStateMachine
+from src.models import ProtocolField, ProtocolMessage, ProtocolSchema, ProtocolState, ProtocolStateMachine, ProtocolTransition
 
 
 NAME_CHARS = st.characters(whitelist_categories=("Ll", "Lu", "Nd"), whitelist_characters=" -_()/§.")
@@ -62,5 +62,45 @@ def test_generate_code_uses_display_names_but_preserves_schema_names(tmp_path: P
     file_names = {Path(path).name for path in result.files}
 
     assert "bfd_sm_bfd_session_state_machine.h" in file_names
-    assert "bfd_msg_bfd_control_packet.h" in file_names
+    assert any(name.startswith("bfd_msg_bfd_control_packet") and name.endswith(".h") for name in file_names)
     assert schema.model_dump() == original_dump
+
+
+def test_generate_code_suffixes_duplicate_state_machine_names(tmp_path: Path):
+    schema = ProtocolSchema(
+        protocol_name="rfc793-TCP",
+        source_document="rfc793-TCP.pdf",
+        state_machines=[
+            ProtocolStateMachine(
+                name="TCP Timeout Handling",
+                states=[ProtocolState(name="ANY", is_initial=True), ProtocolState(name="CLOSED", is_final=True)],
+                transitions=[
+                    ProtocolTransition(
+                        from_state="ANY",
+                        to_state="CLOSED",
+                        event="User timeout expires",
+                    )
+                ],
+            ),
+            ProtocolStateMachine(
+                name="TCP Timeout Handling",
+                states=[ProtocolState(name="TIME-WAIT", is_initial=True), ProtocolState(name="CLOSED", is_final=True)],
+                transitions=[
+                    ProtocolTransition(
+                        from_state="TIME-WAIT",
+                        to_state="CLOSED",
+                        event="Time-wait timeout expires",
+                    )
+                ],
+            ),
+        ],
+    )
+
+    result = generate_code(schema, str(tmp_path))
+    file_names = {Path(path).name for path in result.files}
+    symbol_names = {item["symbol"] for item in result.expected_symbols}
+
+    assert "tcp_sm_tcp_timeout_handling.h" in file_names
+    assert "tcp_sm_tcp_timeout_handling_2.h" in file_names
+    assert "tcp_tcp_timeout_handling_transition" in symbol_names
+    assert "tcp_tcp_timeout_handling_2_transition" in symbol_names

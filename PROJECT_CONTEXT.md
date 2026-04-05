@@ -34,7 +34,7 @@
 
 ## 二、与论文路线的对应关系
 
-结合 [`docs/thesis_outline.md`](docs/thesis_outline.md)，当前项目的论文路线可以概括为四层：
+结合 [`docs/thesis_writing/thesis_outline.md`](docs/thesis_writing/thesis_outline.md)，当前项目的论文路线可以概括为四层：
 
 ### 1. 文档处理与问答底座
 
@@ -372,9 +372,9 @@ data/
 
 当前新增的设计文档：
 
-- `docs/message_ir_design.md`
-- `docs/message_ir_design_optimized.md`
-- `docs/message_ir_design_optimized_v2.md`
+- `docs/frame_ir/message_ir_design.md`
+- `docs/frame_ir/message_ir_design_optimized.md`
+- `docs/frame_ir/message_ir_design_optimized_v2.md`
 
 其核心目标是：
 
@@ -484,8 +484,8 @@ ProtocolMessage -> MessageIR -> C Skeleton -> Real Implementation
 | 理解 codegen | `src/extract/codegen.py` |
 | 理解 verify | `src/extract/verify.py` |
 | 理解 Web API | `src/web/app.py` |
-| 理解 thesis 路线 | `docs/thesis_outline.md` |
-| 理解 MessageIR 方案 | `docs/message_ir_design_optimized_v2.md` |
+| 理解 thesis 路线 | `docs/thesis_writing/thesis_outline.md` |
+| 理解 MessageIR 方案 | `docs/frame_ir/message_ir_design_optimized_v2.md` |
 
 ---
 

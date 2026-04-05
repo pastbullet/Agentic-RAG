@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.extract.option_tlv_models import OptionListIR
 
@@ -118,6 +118,13 @@ class ProtocolTransition(BaseModel):
     condition: str = ""
     actions: list[str] = []
 
+    @field_validator("condition", mode="before")
+    @classmethod
+    def _coerce_null_condition(cls, value):
+        if value is None:
+            return ""
+        return value
+
 
 class ProtocolStateMachine(BaseModel):
     name: str
@@ -153,6 +160,77 @@ class IRDiagnostic(BaseModel):
     message: str
     source_pages: list[int] = []
     source_node_ids: list[str] = []
+
+
+# ── FSM IR v1: BehaviorIR-lite 层 ────────────────────────────
+
+
+class TypedGuard(BaseModel):
+    """Typed guard that codegen can consume directly."""
+
+    kind: Literal[
+        "event_field_eq",
+        "context_field_eq",
+        "context_field_ne",
+        "flag_check",
+        "timer_fired",
+        "always",
+    ]
+    ref_source: Literal["ctx", "msg", "timer", "const", "unknown"] = "unknown"
+    field_ref: str | None = None
+    operator: str | None = None
+    value: str | None = None
+    description: str = ""
+
+
+class TypedAction(BaseModel):
+    """Typed action that codegen can emit as real code."""
+
+    kind: Literal[
+        "set_state",
+        "emit_message",
+        "start_timer",
+        "cancel_timer",
+        "update_field",
+    ]
+    ref_source: Literal["ctx", "msg", "timer", "const", "unknown"] = "unknown"
+    target: str = ""
+    value: str | None = None
+    description: str = ""
+
+
+class TransitionBranch(BaseModel):
+    """One guarded branch within a (state, event) block."""
+
+    guard_typed: TypedGuard | None = None
+    guard_raw: str = ""
+    actions_typed: list[TypedAction] = []
+    actions_raw: list[str] = []
+    next_state: str | None = None
+    notes: list[str] = []
+    readiness: NormalizationStatus = NormalizationStatus.DRAFT
+
+
+class StateEventBlock(BaseModel):
+    """All transitions from one (state, event) pair, grouped."""
+
+    from_state: str
+    event: str
+    branches: list[TransitionBranch] = []
+
+
+class FSMIRv1(BaseModel):
+    """Structured FSM intermediate representation with BehaviorIR-lite."""
+
+    ir_id: str
+    name: str
+    protocol_name: str
+    states: list[ProtocolState] = []
+    events: list[str] = []
+    blocks: list[StateEventBlock] = []
+    source_pages: list[int] = []
+    diagnostics: list[IRDiagnostic] = []
+    normalization_status: NormalizationStatus = NormalizationStatus.DRAFT
 
 
 class EnumValue(BaseModel):
@@ -308,6 +386,7 @@ class ContextFieldIR(BaseModel):
     initial_value_expr: str | None = None
     read_only: bool = False
     optional: bool = False
+    provenance: list[Literal["fsm_ref", "document_clue", "manual_patch"]] = []
     read_by: list[str] = []
     written_by: list[str] = []
     diagnostics: list[IRDiagnostic] = []
@@ -321,6 +400,7 @@ class ContextTimerIR(BaseModel):
     duration_source_kind: str | None = None
     duration_expr: str | None = None
     triggers_event: str | None = None
+    provenance: list[Literal["fsm_ref", "document_clue", "manual_patch"]] = []
     start_actions: list[str] = []
     cancel_actions: list[str] = []
     diagnostics: list[IRDiagnostic] = []
@@ -333,6 +413,7 @@ class ContextResourceIR(BaseModel):
     kind: str = "opaque_handle"
     semantic_role: str | None = None
     element_kind: str | None = None
+    provenance: list[Literal["fsm_ref", "document_clue", "manual_patch"]] = []
     diagnostics: list[IRDiagnostic] = []
 
 
@@ -356,6 +437,70 @@ class StateContextIR(BaseModel):
     invariants: list[ContextRuleIR] = []
     diagnostics: list[IRDiagnostic] = []
     readiness: NormalizationStatus = NormalizationStatus.DRAFT
+
+
+class AlignmentSummary(BaseModel):
+    fsm_count: int = 0
+    error_count: int = 0
+    warning_count: int = 0
+    aligned_fsm_count: int = 0
+    typed_ref_count: int = 0
+    resolved_ref_count: int = 0
+    coverage_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class AlignmentFSMReport(BaseModel):
+    fsm_ir_id: str
+    fsm_name: str
+    error_count: int = 0
+    warning_count: int = 0
+    typed_ref_count: int = 0
+    resolved_ref_count: int = 0
+    diagnostics: list[IRDiagnostic] = []
+
+
+class AlignmentReport(BaseModel):
+    protocol_name: str
+    context_id: str
+    summary: AlignmentSummary = AlignmentSummary()
+    context_diagnostics: list[IRDiagnostic] = []
+    fsm_reports: list[AlignmentFSMReport] = []
+
+
+class ContextFieldPatch(BaseModel):
+    canonical_name: str
+    name: str | None = None
+    type_kind: str | None = None
+    semantic_role: str | None = None
+    width_bits: int | None = None
+    initial_value_kind: str | None = None
+    initial_value_expr: str | None = None
+    optional: bool = False
+
+
+class ContextTimerPatch(BaseModel):
+    canonical_name: str
+    name: str | None = None
+    semantic_role: str | None = None
+    duration_source_kind: str | None = None
+    duration_expr: str | None = None
+    triggers_event: str | None = None
+
+
+class ContextResourcePatch(BaseModel):
+    canonical_name: str
+    name: str | None = None
+    kind: str | None = None
+    semantic_role: str | None = None
+    element_kind: str | None = None
+
+
+class ContextPatch(BaseModel):
+    scope: str | None = None
+    extra_fields: list[ContextFieldPatch] = []
+    extra_timers: list[ContextTimerPatch] = []
+    extra_resources: list[ContextResourcePatch] = []
+    role_overrides: dict[str, str | None] = {}
 
 
 class ProcedureStep(BaseModel):
@@ -390,6 +535,7 @@ class ProtocolSchema(BaseModel):
 
     protocol_name: str
     state_machines: list[ProtocolStateMachine] = []
+    fsm_irs: list[FSMIRv1] = []
     state_contexts: list[StateContextIR] = []
     messages: list[ProtocolMessage] = []
     message_irs: list[MessageIR] = []
